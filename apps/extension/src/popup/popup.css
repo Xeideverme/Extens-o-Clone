@@ -7,7 +7,8 @@
 
 body {
   margin: 0;
-  min-width: 300px;
+  min-width: 430px;
+  max-width: 520px;
 }
 
 .panel {
@@ -16,7 +17,8 @@ body {
   padding: 16px;
 }
 
-header {
+header,
+.status {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -29,28 +31,41 @@ h1 {
   font-weight: 700;
 }
 
-#version {
+#version,
+.label,
+#job-url,
+.asset-url,
+.empty {
   color: #667085;
+}
+
+#version,
+.label {
   font-size: 12px;
 }
 
-.status {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.status,
+.summary {
   border: 1px solid #d0d5dd;
   border-radius: 8px;
   padding: 10px 12px;
   background: #ffffff;
 }
 
-.label {
-  color: #667085;
+.summary {
+  display: grid;
+  gap: 8px;
   font-size: 12px;
 }
 
 strong {
   font-size: 13px;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
 
 button,
@@ -66,6 +81,107 @@ button {
   color: #ffffff;
   background: #1f6feb;
   cursor: pointer;
+}
+
+button.secondary {
+  color: #344054;
+  background: #e4e7ec;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+#job-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress-bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eaecf0;
+}
+
+.progress-bar span {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: #12b76a;
+  transition: width 160ms ease;
+}
+
+.download-stats {
+  line-height: 1.4;
+}
+
+.asset-list {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.asset-item,
+.empty {
+  display: grid;
+  gap: 3px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: #ffffff;
+}
+
+.asset-item.status-downloaded {
+  border-color: #7aefb2;
+}
+
+.asset-item.status-failed {
+  border-color: #fda29b;
+}
+
+.asset-item.status-skipped {
+  border-color: #fedf89;
+}
+
+.asset-name {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-url,
+.asset-meta,
+.asset-source,
+.asset-error {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-meta {
+  color: #344054;
+}
+
+.asset-source {
+  color: #475467;
+}
+
+.asset-error {
+  color: #b42318;
+}
+
+.empty {
+  font-size: 12px;
 }
 
 a {

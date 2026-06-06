@@ -25,6 +25,18 @@
           Inline threshold KB
           <input id="inline-threshold" name="inlineThresholdKb" type="number" min="1" step="1" value="50" />
         </label>
+        <label>
+          Download concurrency
+          <input id="download-concurrency" name="downloadConcurrency" type="number" min="1" step="1" value="4" />
+        </label>
+        <label>
+          Download timeout ms
+          <input id="download-timeout" name="downloadTimeoutMs" type="number" min="1000" step="1000" value="30000" />
+        </label>
+        <label>
+          Max download attempts
+          <input id="max-download-attempts" name="maxDownloadAttempts" type="number" min="1" step="1" value="3" />
+        </label>
         <button type="submit">Salvar</button>
       </form>
       <p id="save-status" aria-live="polite"></p>

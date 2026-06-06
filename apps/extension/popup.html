@@ -13,11 +13,23 @@
         <span id="version">0.1.0</span>
       </header>
       <section class="status" aria-live="polite">
-        <span class="label">Background</span>
+        <span class="label">Estado</span>
         <strong id="status">Verificando...</strong>
       </section>
-      <button id="ping" type="button">Testar conexão</button>
-      <a id="options" href="options.html" target="_blank" rel="noreferrer">Abrir opções</a>
+      <div class="actions">
+        <button id="start-capture" type="button">Iniciar captura</button>
+        <button id="start-downloads" type="button">Iniciar download dos assets</button>
+        <button id="resume-downloads" type="button" hidden>Retomar downloads</button>
+        <button id="cancel-downloads" type="button" class="secondary">Cancelar</button>
+      </div>
+      <section class="summary" aria-live="polite">
+        <span><strong id="asset-count">0</strong> assets</span>
+        <span id="job-url">Nenhum job</span>
+        <div class="progress-bar" aria-hidden="true"><span id="progress-fill"></span></div>
+        <div id="download-stats" class="download-stats">Sem downloads.</div>
+      </section>
+      <ul id="asset-list" class="asset-list"></ul>
+      <a id="options" href="options.html" target="_blank" rel="noreferrer">Abrir opcoes</a>
     </main>
     <script type="module" src="/src/popup/popup.ts"></script>
   </body>

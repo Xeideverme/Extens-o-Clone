@@ -3,6 +3,7 @@
   "name": "Clone3D Snapshot",
   "version": "0.1.0",
   "description": "Authorized page snapshot foundation for web and 3D assets.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnQ8OJHxF7furlddsQ+mhOY0w6wTGZcKqAWwvFl8zhVytWMYJbbu/I/a8N0uPkTIJDFdkGE1jUrGj2JnLdeDyO4usS22ecUADZVT2rkiSeXgkzBuiJtmcDp+M/VeK+3cWl3E1tBqXL/U9IfAD8Y49CCI7j5CynrNlJHiYSVafLjZFAQQbV1MxTwanJgrsLa6CntAJOTuFCE5dGyEPpflCd7SMXaoLIinab7Mdgw1v6FO8lP/8UByRon7F1IIUVH3s9nVKkqJpKZ0qCYBGv1NZNA2HeglRVXp4A05coxz8HOT9afwOMahc7BwAh0ZsJR3UCtn0XKOz/6wgKXU3jZj47QIDAQAB",
   "action": {
     "default_popup": "popup.html",
     "default_title": "Clone3D Snapshot"
