@@ -1,0 +1,6 @@
+name = "clone3d-snapshot-worker"
+main = "src/index.ts"
+compatibility_date = "2026-06-05"
+
+[observability]
+enabled = true

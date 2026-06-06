@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Clone3D Snapshot Options</title>
+    <link rel="stylesheet" href="/src/options/options.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <h1>Clone3D Snapshot</h1>
+        <p>Configuração inicial da extensão.</p>
+      </header>
+      <form id="settings-form">
+        <label>
+          Worker endpoint
+          <input id="worker-endpoint" name="workerEndpoint" type="url" placeholder="https://worker.example.com" />
+        </label>
+        <label>
+          Public assets base URL
+          <input id="public-base-url" name="publicBaseUrl" type="url" placeholder="https://assets.example.com" />
+        </label>
+        <label>
+          Inline threshold KB
+          <input id="inline-threshold" name="inlineThresholdKb" type="number" min="1" step="1" value="50" />
+        </label>
+        <button type="submit">Salvar</button>
+      </form>
+      <p id="save-status" aria-live="polite"></p>
+    </main>
+    <script type="module" src="/src/options/options.ts"></script>
+  </body>
+</html>

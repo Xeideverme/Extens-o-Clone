@@ -1,0 +1,15 @@
+{
+  "name": "@clone3d/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@clone3d/shared": "workspace:*",
+    "@clone3d/storage": "workspace:*"
+  },
+  "devDependencies": {}
+}

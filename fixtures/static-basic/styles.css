@@ -1,0 +1,11 @@
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  color: #172033;
+  background: #f6f7f9;
+}
+
+main {
+  width: min(720px, calc(100% - 32px));
+  margin: 48px auto;
+}
