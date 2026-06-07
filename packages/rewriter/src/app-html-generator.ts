@@ -1,5 +1,6 @@
 import type { AssetRecord, RewriteReport } from "@clone3d/shared";
 import { DEFAULT_INLINE_THRESHOLD_BYTES, getExtension } from "@clone3d/shared";
+import { buildApiReplayMap } from "./api-replay-rewriter";
 import { buildAssetManifest } from "./asset-map";
 import { rewriteHtml } from "./html-rewriter";
 import { buildInlineJsonResponses } from "./json-inliner";
@@ -14,15 +15,21 @@ export function generateAppHtml(input: GenerateAppHtmlInput): GenerateAppHtmlOut
   const textAssets = input.textAssets;
   const inlineThresholdBytes = input.inlineThresholdBytes || DEFAULT_INLINE_THRESHOLD_BYTES;
   const inlineJson = buildInlineJsonResponses(textAssets, manifest, inlineThresholdBytes);
+  const apiReplay = buildApiReplayMap(input.apiSnapshots ?? [], manifest);
   const cssByUrl = buildTextMap(textAssets.filter((textAsset) => isCssAsset(textAsset.asset)));
   const jsByUrl = buildTextMap(textAssets.filter((textAsset) => isJsAsset(textAsset.asset)));
   const manifestScript = `<script id="__CLONE3D_ASSET_MANIFEST__" type="application/json">${escapeJsonForHtml(JSON.stringify(manifest))}</script>`;
+  const apiReplayScript = `<script id="__CLONE3D_API_REPLAY__" type="application/json">${escapeJsonForHtml(JSON.stringify(apiReplay.replayMap))}</script>`;
   const runtimeScript = input.runtimeResolverEnabled
-    ? `<script>${buildRuntimeResolverScript(manifest, inlineJson.inlineResponses)}</script>`
+    ? `<script>${buildRuntimeResolverScript(manifest, inlineJson.inlineResponses, apiReplay.replayMap)}</script>`
     : "";
 
   report.assetsInManifest = manifest.entries.length;
-  report.warnings.push(...manifestResult.warnings, ...inlineJson.warnings);
+  report.apiReplayEntries = apiReplay.entries;
+  report.apiReplayWarnings = apiReplay.warnings;
+  report.apiReplaySkippedSensitive = input.job.apiReplayReport?.skippedSensitive ?? 0;
+  report.apiReplaySkippedTooLarge = input.job.apiReplayReport?.skippedTooLarge ?? 0;
+  report.warnings.push(...manifestResult.warnings, ...inlineJson.warnings, ...apiReplay.warnings);
   if (input.assets.some((asset) => isGltfAsset(asset) && !asset.threeDPrepared)) {
     report.warnings.push("This job contains GLTF files that may require 3D preparation before app.html generation.");
   }
@@ -36,9 +43,10 @@ export function generateAppHtml(input: GenerateAppHtmlInput): GenerateAppHtmlOut
     cssByUrl,
     jsByUrl,
     inlineResponses: inlineJson.inlineResponses,
+    apiReplayMap: apiReplay.replayMap,
     inlineThresholdBytes,
     runtimeScript,
-    manifestScript
+    manifestScript: `${manifestScript}\n${apiReplayScript}`
   });
 
   report.htmlRewrites = rewritten.htmlRewrites;

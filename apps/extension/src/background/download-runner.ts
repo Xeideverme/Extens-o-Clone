@@ -128,16 +128,25 @@ export async function buildJobSummary(jobStore: JobStore, jobId?: string): Promi
   if (!job) {
     return {
       assets: [],
-      domains: []
+      domains: [],
+      pipelineRun: await jobStore.getLatestPipelineRun()
     };
   }
 
   const assets = await jobStore.getAssetsByJob(job.id);
+  const apiReplayReport = await jobStore.getApiReplayReport(job.id);
+  const apiSnapshots = await jobStore.getApiSnapshotsByJob(job.id);
+  const pipelineRun = await jobStore.getPipelineRunByJob(job.id);
 
   return {
     job,
     assets: assets.sort((a, b) => a.normalizedUrl.localeCompare(b.normalizedUrl)),
-    domains: collectDomains(assets)
+    domains: collectDomains(assets),
+    apiReplayReport,
+    apiSnapshots,
+    pipelineRun,
+    latestRewriteReport: job.latestRewriteReport ?? job.rewriteReport ?? job.output?.rewriteReport,
+    latestThreeDPreparationReport: job.latestThreeDPreparationReport ?? job.threeDPreparationReport
   };
 }
 

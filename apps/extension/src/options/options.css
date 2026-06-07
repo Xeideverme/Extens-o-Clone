@@ -45,6 +45,21 @@ label {
   font-weight: 600;
 }
 
+fieldset {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+}
+
+legend {
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .checkbox-row {
   display: flex;
   align-items: center;

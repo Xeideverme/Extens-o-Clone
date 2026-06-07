@@ -1,5 +1,6 @@
 import type {
   AssetManifest,
+  ApiSnapshotRecord,
   AssetRecord,
   HtmlSnapshotRecord,
   JobRecord,
@@ -52,6 +53,7 @@ export interface RewriteHtmlInput {
   cssByUrl: Map<string, string>;
   jsByUrl: Map<string, string>;
   inlineResponses: Record<string, InlineResponse>;
+  apiReplayMap?: Record<string, InlineResponse>;
   inlineThresholdBytes: number;
   runtimeScript: string;
   manifestScript: string;
@@ -78,6 +80,7 @@ export interface GenerateAppHtmlInput {
   assets: AssetRecord[];
   htmlSnapshot: HtmlSnapshotRecord;
   textAssets: TextAssetRecord[];
+  apiSnapshots?: ApiSnapshotRecord[];
   inlineThresholdBytes: number;
   runtimeResolverEnabled: boolean;
   includeRewriteReportInHtml: boolean;

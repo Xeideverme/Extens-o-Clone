@@ -23,6 +23,14 @@ export interface ExtensionSettings {
   generateHtmlSaveAs: boolean;
   includeRewriteReportInHtml: boolean;
   runtimeResolverEnabled: boolean;
+  apiReplayEnabled: boolean;
+  apiReplayMaxBodyKb: number;
+  apiReplayCaptureSameOriginOnly: boolean;
+  apiReplayAllowTextPlain: boolean;
+  pipelineContinueOnPartialFailure: boolean;
+  pipelineAutoPrepare3d: boolean;
+  pipelineAutoGenerateHtml: boolean;
+  pipelinePollIntervalMs: number;
 }
 
 const DEFAULT_SETTINGS: ExtensionSettings = {
@@ -37,7 +45,15 @@ const DEFAULT_SETTINGS: ExtensionSettings = {
   maxUploadAttempts: DEFAULT_MAX_UPLOAD_ATTEMPTS,
   generateHtmlSaveAs: true,
   includeRewriteReportInHtml: true,
-  runtimeResolverEnabled: true
+  runtimeResolverEnabled: true,
+  apiReplayEnabled: true,
+  apiReplayMaxBodyKb: 2048,
+  apiReplayCaptureSameOriginOnly: false,
+  apiReplayAllowTextPlain: true,
+  pipelineContinueOnPartialFailure: true,
+  pipelineAutoPrepare3d: true,
+  pipelineAutoGenerateHtml: true,
+  pipelinePollIntervalMs: 1000
 };
 
 export class SettingsStore {
@@ -51,7 +67,7 @@ export class SettingsStore {
       downloadConcurrency: normalizePositiveInteger(values.downloadConcurrency, DEFAULT_SETTINGS.downloadConcurrency),
       downloadTimeoutMs: normalizePositiveInteger(values.downloadTimeoutMs, DEFAULT_SETTINGS.downloadTimeoutMs),
       maxDownloadAttempts: normalizePositiveInteger(values.maxDownloadAttempts, DEFAULT_SETTINGS.maxDownloadAttempts),
-      uploadConcurrency: normalizePositiveInteger(values.uploadConcurrency, DEFAULT_SETTINGS.uploadConcurrency),
+      uploadConcurrency: normalizeUploadConcurrency(values.uploadConcurrency),
       uploadTimeoutMs: normalizePositiveInteger(values.uploadTimeoutMs, DEFAULT_SETTINGS.uploadTimeoutMs),
       maxUploadAttempts: normalizePositiveInteger(values.maxUploadAttempts, DEFAULT_SETTINGS.maxUploadAttempts),
       generateHtmlSaveAs: normalizeBoolean(values.generateHtmlSaveAs, DEFAULT_SETTINGS.generateHtmlSaveAs),
@@ -59,12 +75,55 @@ export class SettingsStore {
         values.includeRewriteReportInHtml,
         DEFAULT_SETTINGS.includeRewriteReportInHtml
       ),
-      runtimeResolverEnabled: normalizeBoolean(values.runtimeResolverEnabled, DEFAULT_SETTINGS.runtimeResolverEnabled)
+      runtimeResolverEnabled: normalizeBoolean(values.runtimeResolverEnabled, DEFAULT_SETTINGS.runtimeResolverEnabled),
+      apiReplayEnabled: normalizeBoolean(values.apiReplayEnabled, DEFAULT_SETTINGS.apiReplayEnabled),
+      apiReplayMaxBodyKb: normalizeClampedInteger(values.apiReplayMaxBodyKb, 64, 5120, DEFAULT_SETTINGS.apiReplayMaxBodyKb),
+      apiReplayCaptureSameOriginOnly: normalizeBoolean(
+        values.apiReplayCaptureSameOriginOnly,
+        DEFAULT_SETTINGS.apiReplayCaptureSameOriginOnly
+      ),
+      apiReplayAllowTextPlain: normalizeBoolean(values.apiReplayAllowTextPlain, DEFAULT_SETTINGS.apiReplayAllowTextPlain),
+      pipelineContinueOnPartialFailure: normalizeBoolean(
+        values.pipelineContinueOnPartialFailure,
+        DEFAULT_SETTINGS.pipelineContinueOnPartialFailure
+      ),
+      pipelineAutoPrepare3d: normalizeBoolean(values.pipelineAutoPrepare3d, DEFAULT_SETTINGS.pipelineAutoPrepare3d),
+      pipelineAutoGenerateHtml: normalizeBoolean(
+        values.pipelineAutoGenerateHtml,
+        DEFAULT_SETTINGS.pipelineAutoGenerateHtml
+      ),
+      pipelinePollIntervalMs: normalizeClampedInteger(
+        values.pipelinePollIntervalMs,
+        500,
+        5000,
+        DEFAULT_SETTINGS.pipelinePollIntervalMs
+      )
     };
   }
 
   async set(settings: Partial<ExtensionSettings>): Promise<void> {
-    await chrome.storage.local.set(settings);
+    const normalizedSettings: Partial<ExtensionSettings> = { ...settings };
+    if (settings.uploadConcurrency !== undefined) {
+      normalizedSettings.uploadConcurrency = normalizeUploadConcurrency(settings.uploadConcurrency);
+    }
+    if (settings.apiReplayMaxBodyKb !== undefined) {
+      normalizedSettings.apiReplayMaxBodyKb = normalizeClampedInteger(
+        settings.apiReplayMaxBodyKb,
+        64,
+        5120,
+        DEFAULT_SETTINGS.apiReplayMaxBodyKb
+      );
+    }
+    if (settings.pipelinePollIntervalMs !== undefined) {
+      normalizedSettings.pipelinePollIntervalMs = normalizeClampedInteger(
+        settings.pipelinePollIntervalMs,
+        500,
+        5000,
+        DEFAULT_SETTINGS.pipelinePollIntervalMs
+      );
+    }
+
+    await chrome.storage.local.set(normalizedSettings);
   }
 }
 
@@ -85,6 +144,24 @@ function normalizeCaptureMode(value: unknown): CaptureMode {
 function normalizePositiveInteger(value: unknown, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function normalizeClampedInteger(value: unknown, min: number, max: number, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.max(min, Math.min(max, Math.floor(parsed)));
+}
+
+function normalizeUploadConcurrency(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_SETTINGS.uploadConcurrency;
+  }
+
+  return Math.max(1, Math.min(4, Math.floor(parsed)));
 }
 
 function normalizeEndpoint(value: unknown, fallback: string): string {

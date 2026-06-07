@@ -1,3 +1,4 @@
+import { DEFAULT_UPLOAD_CONCURRENCY } from "@clone3d/shared";
 import { SettingsStore } from "../shared/settings-store";
 
 const form = document.querySelector<HTMLFormElement>("#settings-form");
@@ -12,6 +13,14 @@ const maxUploadAttemptsInput = document.querySelector<HTMLInputElement>("#max-up
 const generateHtmlSaveAsInput = document.querySelector<HTMLInputElement>("#generate-html-save-as");
 const includeRewriteReportInput = document.querySelector<HTMLInputElement>("#include-rewrite-report");
 const runtimeResolverEnabledInput = document.querySelector<HTMLInputElement>("#runtime-resolver-enabled");
+const apiReplayEnabledInput = document.querySelector<HTMLInputElement>("#api-replay-enabled");
+const apiReplayMaxBodyInput = document.querySelector<HTMLInputElement>("#api-replay-max-body");
+const apiReplaySameOriginInput = document.querySelector<HTMLInputElement>("#api-replay-same-origin");
+const apiReplayTextPlainInput = document.querySelector<HTMLInputElement>("#api-replay-text-plain");
+const pipelineContinuePartialInput = document.querySelector<HTMLInputElement>("#pipeline-continue-partial");
+const pipelineAutoPrepare3dInput = document.querySelector<HTMLInputElement>("#pipeline-auto-prepare-3d");
+const pipelineAutoGenerateHtmlInput = document.querySelector<HTMLInputElement>("#pipeline-auto-generate-html");
+const pipelinePollIntervalInput = document.querySelector<HTMLInputElement>("#pipeline-poll-interval");
 const saveStatus = document.querySelector<HTMLParagraphElement>("#save-status");
 const settingsStore = new SettingsStore();
 
@@ -68,6 +77,38 @@ async function loadSettings(): Promise<void> {
   if (runtimeResolverEnabledInput) {
     runtimeResolverEnabledInput.checked = settings.runtimeResolverEnabled;
   }
+
+  if (apiReplayEnabledInput) {
+    apiReplayEnabledInput.checked = settings.apiReplayEnabled;
+  }
+
+  if (apiReplayMaxBodyInput) {
+    apiReplayMaxBodyInput.value = String(settings.apiReplayMaxBodyKb);
+  }
+
+  if (apiReplaySameOriginInput) {
+    apiReplaySameOriginInput.checked = settings.apiReplayCaptureSameOriginOnly;
+  }
+
+  if (apiReplayTextPlainInput) {
+    apiReplayTextPlainInput.checked = settings.apiReplayAllowTextPlain;
+  }
+
+  if (pipelineContinuePartialInput) {
+    pipelineContinuePartialInput.checked = settings.pipelineContinueOnPartialFailure;
+  }
+
+  if (pipelineAutoPrepare3dInput) {
+    pipelineAutoPrepare3dInput.checked = settings.pipelineAutoPrepare3d;
+  }
+
+  if (pipelineAutoGenerateHtmlInput) {
+    pipelineAutoGenerateHtmlInput.checked = settings.pipelineAutoGenerateHtml;
+  }
+
+  if (pipelinePollIntervalInput) {
+    pipelinePollIntervalInput.value = String(settings.pipelinePollIntervalMs);
+  }
 }
 
 async function saveSettings(): Promise<void> {
@@ -77,12 +118,20 @@ async function saveSettings(): Promise<void> {
     downloadConcurrency: Number(downloadConcurrencyInput?.value || 4),
     downloadTimeoutMs: Number(downloadTimeoutInput?.value || 30000),
     maxDownloadAttempts: Number(maxDownloadAttemptsInput?.value || 3),
-    uploadConcurrency: Number(uploadConcurrencyInput?.value || 24),
+    uploadConcurrency: Number(uploadConcurrencyInput?.value || DEFAULT_UPLOAD_CONCURRENCY),
     uploadTimeoutMs: Number(uploadTimeoutInput?.value || 60000),
     maxUploadAttempts: Number(maxUploadAttemptsInput?.value || 3),
     generateHtmlSaveAs: Boolean(generateHtmlSaveAsInput?.checked),
     includeRewriteReportInHtml: Boolean(includeRewriteReportInput?.checked),
-    runtimeResolverEnabled: Boolean(runtimeResolverEnabledInput?.checked)
+    runtimeResolverEnabled: Boolean(runtimeResolverEnabledInput?.checked),
+    apiReplayEnabled: Boolean(apiReplayEnabledInput?.checked),
+    apiReplayMaxBodyKb: Number(apiReplayMaxBodyInput?.value || 2048),
+    apiReplayCaptureSameOriginOnly: Boolean(apiReplaySameOriginInput?.checked),
+    apiReplayAllowTextPlain: Boolean(apiReplayTextPlainInput?.checked),
+    pipelineContinueOnPartialFailure: Boolean(pipelineContinuePartialInput?.checked),
+    pipelineAutoPrepare3d: Boolean(pipelineAutoPrepare3dInput?.checked),
+    pipelineAutoGenerateHtml: Boolean(pipelineAutoGenerateHtmlInput?.checked),
+    pipelinePollIntervalMs: Number(pipelinePollIntervalInput?.value || 1000)
   });
 
   if (saveStatus) {

@@ -27,6 +27,9 @@
         <button id="prepare-3d" type="button">Preparar 3D</button>
         <button id="cancel-prepare-3d" type="button" class="secondary">Cancelar 3D</button>
         <button id="generate-app-html" type="button">Gerar app.html</button>
+        <button id="start-pipeline" type="button">Executar pipeline completo</button>
+        <button id="resume-pipeline" type="button" hidden>Retomar pipeline</button>
+        <button id="cancel-pipeline" type="button" class="secondary">Cancelar pipeline</button>
       </div>
       <section class="summary" aria-live="polite">
         <span><strong id="asset-count">0</strong> assets</span>
@@ -35,7 +38,10 @@
         <div id="download-stats" class="download-stats">Sem downloads.</div>
         <div id="upload-stats" class="download-stats">Sem uploads.</div>
         <div id="three-d-stats" class="download-stats">Sem preparação 3D.</div>
+        <div id="api-replay-stats" class="download-stats">API Replay: aguardando captura.</div>
+        <div id="pipeline-stats" class="download-stats">Pipeline: ocioso.</div>
         <div id="rewrite-stats" class="download-stats">Sem app.html.</div>
+        <div class="hint">Para capturar APIs chamadas no inicio da pagina, ative API replay e recarregue a pagina antes de capturar.</div>
       </section>
       <ul id="asset-list" class="asset-list"></ul>
       <a id="options" href="options.html" target="_blank" rel="noreferrer">Abrir opcoes</a>

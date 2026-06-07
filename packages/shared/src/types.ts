@@ -51,6 +51,7 @@ export interface OutputRecord {
   createdAt: number;
   rewriteReport?: RewriteReport;
   threeDPreparationReport?: ThreeDPreparationReport;
+  apiReplayReport?: ApiReplayReport;
 }
 
 export interface JobRecord {
@@ -68,6 +69,11 @@ export interface JobRecord {
   output?: OutputRecord;
   rewriteReport?: RewriteReport;
   threeDPreparationReport?: ThreeDPreparationReport;
+  apiReplayReport?: ApiReplayReport;
+  pipelineRun?: PipelineRunRecord;
+  latestOutputFilename?: string;
+  latestRewriteReport?: RewriteReport;
+  latestThreeDPreparationReport?: ThreeDPreparationReport;
 }
 
 export type AssetSource =
@@ -200,11 +206,28 @@ export interface AssetDiscovery {
 }
 
 export interface MainWorldEvent {
-  kind: "boot" | "fetch" | "xhr-open" | "worker" | "image-src" | "wasm-streaming";
+  kind:
+    | "boot"
+    | "fetch"
+    | "xhr-open"
+    | "worker"
+    | "image-src"
+    | "wasm-streaming"
+    | "api-response"
+    | "api-response-skipped";
   pageUrl: string;
   url?: string;
+  normalizedUrl?: string;
   method?: string;
+  transport?: "fetch" | "xhr";
+  status?: number;
+  contentType?: string;
+  bodyText?: string;
+  size?: number;
+  skippedReason?: string;
   createdAt: number;
+  capturedAt?: number;
+  frameUrl?: string;
 }
 
 export interface ContentCaptureRequest {
@@ -285,6 +308,60 @@ export interface GetRewriteProgressRequest {
   jobId?: string;
 }
 
+export interface ApiSnapshotCapturedMessage {
+  method: "GET";
+  url: string;
+  normalizedUrl?: string;
+  pageUrl?: string;
+  frameUrl?: string;
+  status: number;
+  contentType: string;
+  bodyText: string;
+  size: number;
+  source: ApiSnapshotSource;
+  capturedAt?: number;
+}
+
+export interface ApiSnapshotSkippedMessage {
+  method?: string;
+  url?: string;
+  normalizedUrl?: string;
+  pageUrl?: string;
+  frameUrl?: string;
+  contentType?: string;
+  size?: number;
+  skippedReason: string;
+  source: ApiSnapshotSource;
+  capturedAt?: number;
+}
+
+export interface GetApiReplaySummaryRequest {
+  jobId?: string;
+}
+
+export interface PrepareApiReplayRequest {
+  jobId?: string;
+}
+
+export interface StartFullPipelineRequest {
+  tabId?: number;
+}
+
+export interface ResumePipelineRequest {
+  pipelineRunId?: string;
+  jobId?: string;
+}
+
+export interface GetPipelineProgressRequest {
+  pipelineRunId?: string;
+  jobId?: string;
+}
+
+export interface CancelPipelineRequest {
+  pipelineRunId?: string;
+  jobId?: string;
+}
+
 export interface CurrentHtmlSnapshotRequest {
   jobId?: string;
 }
@@ -340,6 +417,10 @@ export interface RewriteReport {
   assetsInManifest: number;
   unresolvedUrls: string[];
   warnings: string[];
+  apiReplayEntries?: number;
+  apiReplayWarnings?: string[];
+  apiReplaySkippedSensitive?: number;
+  apiReplaySkippedTooLarge?: number;
   outputFilename?: string;
   outputSize?: number;
 }
@@ -375,8 +456,98 @@ export interface ThreeDPreparationReport {
   errors: string[];
 }
 
+export type ApiSnapshotSource =
+  | "fetch-hook"
+  | "xhr-hook"
+  | "downloaded-json"
+  | "manual"
+  | "runtime-candidate";
+
+export type ApiSnapshotStatus =
+  | "captured"
+  | "rewritten"
+  | "inlined"
+  | "skipped"
+  | "failed";
+
+export interface ApiSnapshotRecord {
+  id: string;
+  jobId: string;
+  method: "GET";
+  url: string;
+  normalizedUrl: string;
+  urlWithoutHash?: string;
+  pageUrl?: string;
+  frameUrl?: string;
+  status: ApiSnapshotStatus;
+  httpStatus: number;
+  contentType: string;
+  size: number;
+  bodyText?: string;
+  bodyBlobId?: string;
+  source: ApiSnapshotSource;
+  capturedAt: number;
+  updatedAt: number;
+  replayable: boolean;
+  rewritten: boolean;
+  skippedReason?: string;
+  lastError?: string;
+  sha256?: string;
+  methodAndUrl?: string;
+}
+
+export interface ApiReplayReport {
+  jobId: string;
+  startedAt: number;
+  finishedAt?: number;
+  capturedResponses: number;
+  storedResponses: number;
+  rewrittenResponses: number;
+  inlinedResponses: number;
+  skippedSensitive: number;
+  skippedTooLarge: number;
+  skippedUnsupportedContentType: number;
+  skippedUnsupportedMethod: number;
+  replayMapEntries: number;
+  warnings: string[];
+  errors: string[];
+}
+
+export type PipelineStage =
+  | "idle"
+  | "capturing"
+  | "downloading"
+  | "uploading"
+  | "preparing-3d"
+  | "rewriting"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface PipelineRunRecord {
+  id: string;
+  jobId?: string;
+  tabId?: number;
+  status: "running" | "completed" | "failed" | "cancelled";
+  stage: PipelineStage;
+  startedAt: number;
+  updatedAt: number;
+  finishedAt?: number;
+  continueOnPartialFailure: boolean;
+  autoPrepare3d: boolean;
+  autoGenerateHtml: boolean;
+  currentStepLabel?: string;
+  errors: string[];
+  warnings: string[];
+}
+
 export interface JobSummary {
   job?: JobRecord;
   assets: AssetRecord[];
   domains: string[];
+  apiReplayReport?: ApiReplayReport;
+  apiSnapshots?: ApiSnapshotRecord[];
+  pipelineRun?: PipelineRunRecord;
+  latestRewriteReport?: RewriteReport;
+  latestThreeDPreparationReport?: ThreeDPreparationReport;
 }

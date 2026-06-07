@@ -3,10 +3,12 @@ import type { InlineResponse } from "./types";
 
 export function buildRuntimeResolverScript(
   manifest: AssetManifest,
-  inlineResponses: Record<string, InlineResponse> = {}
+  inlineResponses: Record<string, InlineResponse> = {},
+  apiReplayMap: Record<string, InlineResponse> = {}
 ): string {
   const assetMapJson = JSON.stringify(manifest.map);
   const inlineResponsesJson = JSON.stringify(inlineResponses);
+  const apiReplayMapJson = JSON.stringify(apiReplayMap);
 
   return `(function () {
   try {
@@ -15,8 +17,10 @@ export function buildRuntimeResolverScript(
 
     const ASSET_MAP = ${assetMapJson};
     const INLINE_RESPONSES = ${inlineResponsesJson};
+    const API_REPLAY = ${apiReplayMapJson};
     window.__CLONE3D_ASSET_MAP__ = ASSET_MAP;
     window.__CLONE3D_INLINE_RESPONSES__ = INLINE_RESPONSES;
+    window.__CLONE3D_API_REPLAY__ = API_REPLAY;
 
     function normalizeUrl(input, base) {
       try {
@@ -53,18 +57,57 @@ export function buildRuntimeResolverScript(
       return INLINE_RESPONSES[raw] || INLINE_RESPONSES[abs] || INLINE_RESPONSES[noHash];
     }
 
+    function apiReplayKeys(method, input, base) {
+      const normalizedMethod = String(method || "GET").toUpperCase();
+      const raw = String(input);
+      const abs = normalizeUrl(raw, base);
+      const keys = [normalizedMethod + " " + raw, normalizedMethod + " " + abs, normalizedMethod + " " + abs.split("#")[0]];
+      try {
+        const parsed = new URL(abs);
+        keys.push(normalizedMethod + " " + parsed.pathname + parsed.search);
+        keys.push(normalizedMethod + " " + parsed.pathname);
+      } catch {}
+      return keys;
+    }
+
+    function findApiReplay(method, input, base) {
+      if (String(method || "GET").toUpperCase() !== "GET") return undefined;
+      for (const key of apiReplayKeys(method, input, base || location.href)) {
+        if (API_REPLAY[key]) return API_REPLAY[key];
+      }
+      return undefined;
+    }
+
+    function readFetchMethod(input, init) {
+      return String((init && init.method) || (input && input.method) || "GET").toUpperCase();
+    }
+
+    function readFetchUrl(input) {
+      return typeof input === "string" || input instanceof URL ? String(input) : input && input.url;
+    }
+
+    function responseFromReplay(replay) {
+      return new Response(replay.bodyText || "", {
+        status: replay.status || 200,
+        headers: { "content-type": replay.contentType || "application/json; charset=utf-8" }
+      });
+    }
+
     window.__clone3dResolveUrl = resolveUrl;
 
     try {
       const originalFetch = window.fetch;
       window.fetch = function clone3dFetch(input, init) {
-        const url = typeof input === "string" || input instanceof URL ? String(input) : input && input.url;
+        const url = readFetchUrl(input);
+        const method = readFetchMethod(input, init);
+        const replay = url ? findApiReplay(method, url, location.href) : undefined;
+        if (replay) {
+          return Promise.resolve(responseFromReplay(replay));
+        }
+
         const inline = url ? inlineResponseFor(url, location.href) : undefined;
         if (inline) {
-          return Promise.resolve(new Response(inline.bodyText, {
-            status: inline.status || 200,
-            headers: { "content-type": inline.contentType || "application/json; charset=utf-8" }
-          }));
+          return Promise.resolve(responseFromReplay(inline));
         }
 
         if (typeof input === "string" || input instanceof URL) {
@@ -88,9 +131,44 @@ export function buildRuntimeResolverScript(
 
     try {
       const originalOpen = XMLHttpRequest.prototype.open;
+      const originalSend = XMLHttpRequest.prototype.send;
       XMLHttpRequest.prototype.open = function clone3dOpen(method, url) {
+        this.__clone3dMethod = String(method || "GET").toUpperCase();
+        this.__clone3dUrl = String(url);
         arguments[1] = resolveUrl(url, location.href);
         return originalOpen.apply(this, arguments);
+      };
+      XMLHttpRequest.prototype.send = function clone3dSend(body) {
+        try {
+          const replay = this.__clone3dUrl ? findApiReplay(this.__clone3dMethod || "GET", this.__clone3dUrl, location.href) : undefined;
+          if (replay) {
+            const xhr = this;
+            setTimeout(function () {
+              try {
+                const text = replay.bodyText || "";
+                Object.defineProperty(xhr, "readyState", { configurable: true, value: 4 });
+                Object.defineProperty(xhr, "status", { configurable: true, value: replay.status || 200 });
+                Object.defineProperty(xhr, "statusText", { configurable: true, value: "OK" });
+                Object.defineProperty(xhr, "responseText", { configurable: true, value: text });
+                let response = text;
+                if (xhr.responseType === "json") {
+                  try { response = JSON.parse(text); } catch {}
+                }
+                Object.defineProperty(xhr, "response", { configurable: true, value: response });
+                if (typeof xhr.onreadystatechange === "function") xhr.onreadystatechange(new Event("readystatechange"));
+                xhr.dispatchEvent(new Event("readystatechange"));
+                if (typeof xhr.onload === "function") xhr.onload(new Event("load"));
+                xhr.dispatchEvent(new Event("load"));
+                if (typeof xhr.onloadend === "function") xhr.onloadend(new Event("loadend"));
+                xhr.dispatchEvent(new Event("loadend"));
+              } catch {
+                try { return originalSend.call(xhr, body); } catch {}
+              }
+            }, 0);
+            return;
+          }
+        } catch {}
+        return originalSend.call(this, body);
       };
     } catch {}
 

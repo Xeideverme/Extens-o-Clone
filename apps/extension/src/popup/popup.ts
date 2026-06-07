@@ -1,5 +1,6 @@
 import { EXTENSION_MESSAGE_TYPES } from "@clone3d/shared";
 import type { AssetRecord, JobRecord, JobSummary } from "@clone3d/shared";
+import { SettingsStore } from "../shared/settings-store";
 
 const statusEl = document.querySelector<HTMLElement>("#status");
 const startButton = document.querySelector<HTMLButtonElement>("#start-capture");
@@ -12,20 +13,28 @@ const cancelUploadsButton = document.querySelector<HTMLButtonElement>("#cancel-u
 const prepare3dButton = document.querySelector<HTMLButtonElement>("#prepare-3d");
 const cancelPrepare3dButton = document.querySelector<HTMLButtonElement>("#cancel-prepare-3d");
 const generateAppHtmlButton = document.querySelector<HTMLButtonElement>("#generate-app-html");
+const startPipelineButton = document.querySelector<HTMLButtonElement>("#start-pipeline");
+const resumePipelineButton = document.querySelector<HTMLButtonElement>("#resume-pipeline");
+const cancelPipelineButton = document.querySelector<HTMLButtonElement>("#cancel-pipeline");
 const assetCountEl = document.querySelector<HTMLElement>("#asset-count");
 const jobUrlEl = document.querySelector<HTMLElement>("#job-url");
 const downloadStatsEl = document.querySelector<HTMLElement>("#download-stats");
 const uploadStatsEl = document.querySelector<HTMLElement>("#upload-stats");
 const threeDStatsEl = document.querySelector<HTMLElement>("#three-d-stats");
+const apiReplayStatsEl = document.querySelector<HTMLElement>("#api-replay-stats");
+const pipelineStatsEl = document.querySelector<HTMLElement>("#pipeline-stats");
 const rewriteStatsEl = document.querySelector<HTMLElement>("#rewrite-stats");
 const progressFillEl = document.querySelector<HTMLElement>("#progress-fill");
 const assetListEl = document.querySelector<HTMLUListElement>("#asset-list");
+const settingsStore = new SettingsStore();
 
-type PollingMode = "download" | "upload" | "prepare3d" | "rewrite";
+type PollingMode = "download" | "upload" | "prepare3d" | "rewrite" | "pipeline";
 
 let currentJobId: string | undefined;
+let currentPipelineRunId: string | undefined;
 let pollingTimer: number | undefined;
 let pollingMode: PollingMode = "download";
+let pollIntervalMs = 1000;
 
 startButton?.addEventListener("click", () => {
   void startCapture();
@@ -67,7 +76,29 @@ generateAppHtmlButton?.addEventListener("click", () => {
   void generateAppHtml();
 });
 
+startPipelineButton?.addEventListener("click", () => {
+  void startPipeline(EXTENSION_MESSAGE_TYPES.startFullPipeline);
+});
+
+resumePipelineButton?.addEventListener("click", () => {
+  void startPipeline(EXTENSION_MESSAGE_TYPES.resumePipeline);
+});
+
+cancelPipelineButton?.addEventListener("click", () => {
+  void cancelPipeline();
+});
+
+void loadPopupSettings();
 void loadLatestSummary();
+
+async function loadPopupSettings(): Promise<void> {
+  try {
+    const settings = await settingsStore.get();
+    pollIntervalMs = settings.pipelinePollIntervalMs;
+  } catch {
+    pollIntervalMs = 1000;
+  }
+}
 
 async function startCapture(): Promise<void> {
   setCaptureBusy(true);
@@ -282,6 +313,56 @@ async function generateAppHtml(): Promise<void> {
   }
 }
 
+async function startPipeline(type: string): Promise<void> {
+  setPipelineBusy(true);
+  setStatus(type === EXTENSION_MESSAGE_TYPES.resumePipeline ? "Retomando pipeline..." : "Executando pipeline...");
+
+  try {
+    const tabId = await getCaptureTabId();
+    const response = await chrome.runtime.sendMessage({
+      type,
+      payload: {
+        pipelineRunId: currentPipelineRunId,
+        jobId: currentJobId,
+        tabId
+      }
+    });
+
+    if (!response?.ok) {
+      setStatus(response?.error || "Falha ao iniciar pipeline");
+      renderSummary(response?.summary);
+      return;
+    }
+
+    currentPipelineRunId = response.pipelineRun?.id ?? response.summary?.pipelineRun?.id;
+    renderSummary(response.summary);
+    startPolling("pipeline");
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : "Falha ao iniciar pipeline");
+  } finally {
+    setPipelineBusy(false);
+  }
+}
+
+async function cancelPipeline(): Promise<void> {
+  if (!currentPipelineRunId && !currentJobId) {
+    return;
+  }
+
+  setStatus("Cancelando pipeline...");
+  const response = await chrome.runtime.sendMessage({
+    type: EXTENSION_MESSAGE_TYPES.cancelPipeline,
+    payload: {
+      pipelineRunId: currentPipelineRunId,
+      jobId: currentJobId
+    }
+  });
+
+  stopPolling();
+  renderSummary(response?.summary);
+  setStatus(response?.ok ? "Pipeline cancelado" : "Falha ao cancelar pipeline");
+}
+
 async function loadLatestSummary(): Promise<void> {
   setStatus("Pronto");
 
@@ -292,7 +373,9 @@ async function loadLatestSummary(): Promise<void> {
     });
 
     renderSummary(response?.summary);
-    if (response?.summary?.job?.status === "downloading") {
+    if (response?.summary?.pipelineRun?.status === "running") {
+      startPolling("pipeline");
+    } else if (response?.summary?.job?.status === "downloading") {
       startPolling("download");
     } else if (response?.summary?.job?.status === "uploading") {
       startPolling("upload");
@@ -311,7 +394,7 @@ function startPolling(mode: PollingMode): void {
   pollingMode = mode;
   pollingTimer = window.setInterval(() => {
     void refreshProgress();
-  }, 1000);
+  }, pollIntervalMs);
   void refreshProgress();
 }
 
@@ -327,19 +410,27 @@ async function refreshProgress(): Promise<void> {
     type:
       pollingMode === "rewrite"
         ? EXTENSION_MESSAGE_TYPES.getRewriteProgress
+        : pollingMode === "pipeline"
+        ? EXTENSION_MESSAGE_TYPES.getPipelineProgress
         : pollingMode === "prepare3d"
         ? EXTENSION_MESSAGE_TYPES.getPrepare3dProgress
         : pollingMode === "upload"
         ? EXTENSION_MESSAGE_TYPES.getUploadProgress
         : EXTENSION_MESSAGE_TYPES.getDownloadProgress,
     payload: {
-      jobId: currentJobId
+      jobId: currentJobId,
+      pipelineRunId: currentPipelineRunId
     }
   });
 
   renderSummary(response?.summary);
+  currentPipelineRunId = response?.pipelineRun?.id ?? response?.summary?.pipelineRun?.id ?? currentPipelineRunId;
   const status = response?.summary?.job?.status;
-  if (isTerminalStatus(status, pollingMode)) {
+  const pipelineStatus = response?.pipelineRun?.status ?? response?.summary?.pipelineRun?.status;
+  if (pollingMode === "pipeline" && pipelineStatus && pipelineStatus !== "running") {
+    stopPolling();
+    setStatus(pipelineStatus === "completed" ? "Pipeline concluido" : pipelineStatus === "cancelled" ? "Pipeline cancelado" : "Pipeline falhou");
+  } else if (isTerminalStatus(status, pollingMode)) {
     stopPolling();
     setStatus(statusToLabel(status));
   } else if (status) {
@@ -423,10 +514,21 @@ function setRewriteBusy(value: boolean): void {
   }
 }
 
+function setPipelineBusy(value: boolean): void {
+  if (startPipelineButton) {
+    startPipelineButton.disabled = value;
+  }
+
+  if (resumePipelineButton) {
+    resumePipelineButton.disabled = value;
+  }
+}
+
 function renderSummary(summary?: JobSummary): void {
   const assets = summary?.assets ?? [];
   const job = summary?.job;
   currentJobId = job?.id;
+  currentPipelineRunId = summary?.pipelineRun?.id ?? job?.pipelineRun?.id ?? currentPipelineRunId;
 
   if (assetCountEl) {
     assetCountEl.textContent = String(assets.length);
@@ -440,8 +542,10 @@ function renderSummary(summary?: JobSummary): void {
   renderDownloadStats(job);
   renderUploadStats(job);
   renderThreeDStats(job);
+  renderApiReplayStats(summary);
+  renderPipelineStats(summary);
   renderRewriteStats(job);
-  updateActions(job);
+  updateActions(job, assets, summary?.pipelineRun);
 
   if (!assetListEl) {
     return;
@@ -531,6 +635,51 @@ function renderThreeDStats(job: JobRecord | undefined): void {
   ].join(" | ");
 }
 
+function renderApiReplayStats(summary: JobSummary | undefined): void {
+  if (!apiReplayStatsEl) {
+    return;
+  }
+
+  const report = summary?.apiReplayReport || summary?.job?.apiReplayReport || summary?.job?.output?.apiReplayReport;
+  const snapshots = summary?.apiSnapshots ?? [];
+  if (!report && snapshots.length === 0) {
+    apiReplayStatsEl.textContent = "API Replay: ativo por padrao, sem snapshots.";
+    return;
+  }
+
+  const replayable = snapshots.filter((snapshot) => snapshot.replayable).length;
+  apiReplayStatsEl.textContent = [
+    `API Replay: ${snapshots.length} snapshots`,
+    `replayable: ${replayable}`,
+    `capturados: ${report?.capturedResponses ?? snapshots.length}`,
+    `sensivel: ${report?.skippedSensitive ?? 0}`,
+    `grande: ${report?.skippedTooLarge ?? 0}`,
+    `tipo nao suportado: ${report?.skippedUnsupportedContentType ?? 0}`
+  ].join(" | ");
+}
+
+function renderPipelineStats(summary: JobSummary | undefined): void {
+  if (!pipelineStatsEl) {
+    return;
+  }
+
+  const pipelineRun = summary?.pipelineRun || summary?.job?.pipelineRun;
+  if (!pipelineRun) {
+    pipelineStatsEl.textContent = "Pipeline: ocioso.";
+    return;
+  }
+
+  pipelineStatsEl.textContent = [
+    `Pipeline: ${pipelineRun.status}`,
+    `etapa: ${pipelineRun.stage}`,
+    pipelineRun.currentStepLabel,
+    pipelineRun.warnings.length > 0 ? `avisos: ${pipelineRun.warnings.length}` : undefined,
+    pipelineRun.errors.length > 0 ? `erros: ${pipelineRun.errors.length}` : undefined
+  ]
+    .filter(Boolean)
+    .join(" | ");
+}
+
 function renderRewriteStats(job: JobRecord | undefined): void {
   if (!rewriteStatsEl) {
     return;
@@ -552,12 +701,15 @@ function renderRewriteStats(job: JobRecord | undefined): void {
   ].join(" | ");
 }
 
-function updateActions(job: JobRecord | undefined): void {
+function updateActions(job: JobRecord | undefined, assets: AssetRecord[], summaryPipelineRun: JobSummary["pipelineRun"]): void {
   const hasJob = Boolean(job);
   const status = job?.status;
+  const pipelineRun = summaryPipelineRun || job?.pipelineRun;
+  const pipelineRunning = pipelineRun?.status === "running";
+  const has3dAssets = hasLikelyThreeDAssets(job, assets);
 
   if (startDownloadsButton) {
-    startDownloadsButton.disabled = !hasJob || status === "downloading" || status === "uploading" || status === "preparing-3d";
+    startDownloadsButton.disabled = pipelineRunning || !hasJob || status === "downloading" || status === "uploading" || status === "preparing-3d";
   }
 
   if (resumeDownloadsButton) {
@@ -571,6 +723,7 @@ function updateActions(job: JobRecord | undefined): void {
 
   if (startUploadsButton) {
     startUploadsButton.disabled =
+      pipelineRunning ||
       !hasJob ||
       status === "downloading" ||
       status === "uploading" ||
@@ -589,8 +742,11 @@ function updateActions(job: JobRecord | undefined): void {
 
   if (prepare3dButton) {
     const uploadedAssets = job?.stats.uploadedAssets ?? 0;
+    prepare3dButton.hidden = !has3dAssets && status !== "preparing-3d";
     prepare3dButton.disabled =
+      pipelineRunning ||
       !hasJob ||
+      !has3dAssets ||
       uploadedAssets <= 0 ||
       status === "downloading" ||
       status === "uploading" ||
@@ -599,18 +755,33 @@ function updateActions(job: JobRecord | undefined): void {
   }
 
   if (cancelPrepare3dButton) {
+    cancelPrepare3dButton.hidden = status !== "preparing-3d";
     cancelPrepare3dButton.disabled = !hasJob || status !== "preparing-3d";
   }
 
   if (generateAppHtmlButton) {
     const uploadedAssets = job?.stats.uploadedAssets ?? 0;
     generateAppHtmlButton.disabled =
+      pipelineRunning ||
       !hasJob ||
       uploadedAssets <= 0 ||
       status === "downloading" ||
       status === "uploading" ||
       status === "preparing-3d" ||
       status === "rewriting";
+  }
+
+  if (startPipelineButton) {
+    startPipelineButton.disabled = pipelineRunning;
+  }
+
+  if (resumePipelineButton) {
+    resumePipelineButton.hidden = !(pipelineRun?.status === "failed" || pipelineRun?.status === "cancelled");
+    resumePipelineButton.disabled = pipelineRunning;
+  }
+
+  if (cancelPipelineButton) {
+    cancelPipelineButton.disabled = !pipelineRunning;
   }
 }
 
@@ -675,6 +846,32 @@ function renderAsset(asset: AssetRecord): HTMLLIElement {
   }
 
   return item;
+}
+
+function hasLikelyThreeDAssets(job: JobRecord | undefined, assets: AssetRecord[]): boolean {
+  if ((job?.threeDPreparationReport?.detected3dAssets ?? 0) > 0) {
+    return true;
+  }
+
+  return assets.some((asset) => {
+    if (asset.isDerivedAsset) {
+      return false;
+    }
+
+    if (
+      asset.assetRole &&
+      !["html", "css", "script", "json", "image", "audio", "video", "unknown"].includes(asset.assetRole)
+    ) {
+      return true;
+    }
+
+    const value = `${asset.normalizedUrl} ${asset.originalUrl}`.toLowerCase();
+    return (
+      /\.(gltf|glb|bin|drc|ktx2|basis|wasm|hdr|exr)(?:[?#\s]|$)/i.test(value) ||
+      /(?:draco|basis_transcoder|meshopt|ktx2loader|dracoloader|\.worker\.(?:js|mjs))/i.test(value) ||
+      asset.source.includes("worker-hook")
+    );
+  });
 }
 
 function getAssetName(value: string): string {

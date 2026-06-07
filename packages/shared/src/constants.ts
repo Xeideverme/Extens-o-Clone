@@ -25,6 +25,14 @@ export const EXTENSION_MESSAGE_TYPES = {
   prepare3dAssets: "clone3d:prepare3dAssets",
   getPrepare3dProgress: "clone3d:getPrepare3dProgress",
   cancelPrepare3d: "clone3d:cancelPrepare3d",
+  apiSnapshotCaptured: "clone3d:apiSnapshotCaptured",
+  apiSnapshotSkipped: "clone3d:apiSnapshotSkipped",
+  getApiReplaySummary: "clone3d:getApiReplaySummary",
+  prepareApiReplay: "clone3d:prepareApiReplay",
+  startFullPipeline: "clone3d:startFullPipeline",
+  resumePipeline: "clone3d:resumePipeline",
+  getPipelineProgress: "clone3d:getPipelineProgress",
+  cancelPipeline: "clone3d:cancelPipeline",
   getLatestJobSummary: "clone3d:getLatestJobSummary"
 } as const;
 
@@ -36,7 +44,7 @@ export const DEFAULT_MAX_DOWNLOAD_ATTEMPTS = 3;
 
 export const CATBOX_OFFICIAL_API_ENDPOINT = "https://catbox.moe/user/api.php";
 export const DEFAULT_CATBOX_UPLOAD_ENDPOINT = CATBOX_OFFICIAL_API_ENDPOINT;
-export const DEFAULT_UPLOAD_CONCURRENCY = 24;
+export const DEFAULT_UPLOAD_CONCURRENCY = 3;
 export const DEFAULT_UPLOAD_TIMEOUT_MS = 60_000;
 export const DEFAULT_MAX_UPLOAD_ATTEMPTS = 3;
 export const CATBOX_MAX_UPLOAD_BYTES = 200 * 1024 * 1024;

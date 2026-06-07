@@ -12,6 +12,7 @@ import type {
 import { EXTENSION_MESSAGE_TYPES, getExtension } from "@clone3d/shared";
 import { buildJobSummary } from "./download-runner";
 import { downloadGeneratedHtml } from "./output-downloader";
+import { prepareApiReplaySnapshots } from "./api-replay-runner";
 import type { ExtensionSettings } from "../shared/settings-store";
 
 export interface RewriteRunnerDeps {
@@ -53,11 +54,20 @@ export async function runPreparedRewriteJob(jobId: string, deps: RewriteRunnerDe
 
     const htmlSnapshot = await getHtmlSnapshot(job.id, deps.jobStore, job.tabId);
     const textAssets = await loadTextAssets(assets, deps.blobStore);
+    if (deps.settings.apiReplayEnabled) {
+      await prepareApiReplaySnapshots(job.id, { jobStore: deps.jobStore });
+    }
+    const apiSnapshots = deps.settings.apiReplayEnabled ? await deps.jobStore.getApiSnapshotsByJob(job.id) : [];
+    const apiReplayReport = deps.settings.apiReplayEnabled ? await deps.jobStore.getApiReplayReport(job.id) : undefined;
     const generated = generateAppHtml({
-      job,
+      job: {
+        ...job,
+        apiReplayReport
+      },
       assets,
       htmlSnapshot,
       textAssets,
+      apiSnapshots,
       inlineThresholdBytes: deps.settings.inlineThresholdKb * 1024,
       runtimeResolverEnabled: deps.settings.runtimeResolverEnabled,
       includeRewriteReportInHtml: deps.settings.includeRewriteReportInHtml
@@ -93,9 +103,13 @@ export async function runPreparedRewriteJob(jobId: string, deps: RewriteRunnerDe
         type: "app-html",
         size: htmlBlob.size,
         createdAt: output.createdAt,
-        rewriteReport: report
+        rewriteReport: report,
+        apiReplayReport
       },
-      rewriteReport: report
+      rewriteReport: report,
+      apiReplayReport,
+      latestOutputFilename: generated.filename,
+      latestRewriteReport: report
     });
 
     return buildJobSummary(deps.jobStore, job.id);

@@ -76,16 +76,16 @@ export async function runPreparedThreeDJob(jobId: string, deps: Prepare3dRunnerD
     report = await appendReport(job.id, deps.jobStore, { warnings: manifestResult.warnings });
   }
 
-  for (const asset of assets.filter((candidate) => candidate.assetRole === "glb")) {
+  for (const asset of assets.filter((candidate) => !candidate.isDerivedAsset && candidate.assetRole === "glb")) {
     if (await isCancelled(job.id, deps.jobStore)) {
       return buildJobSummary(deps.jobStore, job.id);
     }
 
-    await prepareGlb(asset, deps.jobStore);
+    await prepareGlb(asset, deps.jobStore, options.force);
   }
 
   assets = await deps.jobStore.getAssetsByJob(job.id);
-  for (const asset of assets.filter((candidate) => candidate.assetRole === "gltf")) {
+  for (const asset of assets.filter((candidate) => !candidate.isDerivedAsset && candidate.assetRole === "gltf")) {
     if (await isCancelled(job.id, deps.jobStore)) {
       return buildJobSummary(deps.jobStore, job.id);
     }
@@ -148,6 +148,10 @@ async function detectAndPersistRoles(jobId: string, jobStore: JobStore): Promise
   const assets = await jobStore.getAssetsByJob(jobId);
 
   for (const asset of assets) {
+    if (asset.isDerivedAsset) {
+      continue;
+    }
+
     const role = detect3dAssetRole(asset);
     const is3d = isThreeDAssetRole(role);
     if (asset.assetRole !== role || asset.is3dAsset !== is3d) {
@@ -313,8 +317,8 @@ async function prepareWorkerOrDecoderAsset(
   });
 }
 
-async function prepareGlb(asset: AssetRecord, jobStore: JobStore): Promise<void> {
-  if (asset.threeDPrepared) {
+async function prepareGlb(asset: AssetRecord, jobStore: JobStore, force: boolean): Promise<void> {
+  if (!force && asset.threeDPrepared) {
     return;
   }
 
@@ -425,7 +429,9 @@ function createInitialReport(jobId: string, assets: AssetRecord[]): ThreeDPrepar
 }
 
 function countAssets(assets: AssetRecord[]) {
-  const roles = assets.map((asset) => asset.assetRole ?? detect3dAssetRole(asset));
+  const roles = assets
+    .filter((asset) => !asset.isDerivedAsset)
+    .map((asset) => asset.assetRole ?? detect3dAssetRole(asset));
   return {
     detected3dAssets: roles.filter(isThreeDAssetRole).length,
     decoderAssetsDetected: roles.filter(isDecoderAssetRole).length,
@@ -436,6 +442,10 @@ function countAssets(assets: AssetRecord[]) {
 }
 
 function isWorkerOrDecoderCandidate(asset: AssetRecord): boolean {
+  if (asset.isDerivedAsset) {
+    return false;
+  }
+
   const extension = getExtension(asset.normalizedUrl) || getExtension(asset.originalUrl);
   const role = asset.assetRole;
   return Boolean(
