@@ -14,6 +14,7 @@
   patchXhrOpen();
   patchWorker();
   patchImageSrc();
+  patchWebAssemblyStreaming();
 
   function report(event: { kind: string; url?: string; method?: string }): void {
     window.postMessage(
@@ -102,6 +103,41 @@
         });
 
         descriptor.set?.call(this, value);
+      }
+    });
+  }
+
+  function patchWebAssemblyStreaming(): void {
+    const webAssembly = window.WebAssembly;
+    if (!webAssembly) {
+      return;
+    }
+
+    patchStreamingFunction(webAssembly, "instantiateStreaming");
+    patchStreamingFunction(webAssembly, "compileStreaming");
+  }
+
+  function patchStreamingFunction(target: typeof WebAssembly, key: "instantiateStreaming" | "compileStreaming"): void {
+    const original = target[key];
+    if (typeof original !== "function") {
+      return;
+    }
+
+    Object.defineProperty(target, key, {
+      configurable: true,
+      value(input: Response | PromiseLike<Response>, ...rest: unknown[]) {
+        void Promise.resolve(input)
+          .then((response) => {
+            if (response?.url) {
+              report({
+                kind: "wasm-streaming",
+                url: response.url
+              });
+            }
+          })
+          .catch(() => undefined);
+
+        return (original as (...args: unknown[]) => unknown).apply(this, [input, ...rest]);
       }
     });
   }

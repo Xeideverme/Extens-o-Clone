@@ -4,18 +4,47 @@ import type {
   AssetDiscovery,
   AssetRecord,
   CancelDownloadsRequest,
+  CancelPrepare3dRequest,
+  CancelUploadsRequest,
   ContentCaptureResult,
   ExtensionMessage,
+  GenerateAppHtmlRequest,
   GetDownloadProgressRequest,
   GetJobSummaryRequest,
+  GetPrepare3dProgressRequest,
+  GetRewriteProgressRequest,
+  GetUploadProgressRequest,
   JobStats,
   JobSummary,
   MainWorldEvent,
+  Prepare3dAssetsRequest,
   ResumeDownloadsRequest,
+  ResumeUploadsRequest,
   StartCaptureRequest,
-  StartDownloadsRequest
+  StartDownloadsRequest,
+  StartUploadsRequest
 } from "@clone3d/shared";
-import { buildJobSummary, startAssetDownloads } from "./download-runner";
+import {
+  buildJobSummary,
+  markDownloadRunFailed,
+  prepareAssetDownloads,
+  runPreparedAssetDownloads
+} from "./download-runner";
+import {
+  markUploadRunFailed,
+  prepareAssetUploads,
+  runPreparedAssetUploads
+} from "./upload-runner";
+import {
+  markRewriteRunFailed,
+  prepareRewriteJob,
+  runPreparedRewriteJob
+} from "./rewrite-runner";
+import {
+  markPrepare3dRunFailed,
+  prepareThreeDJob,
+  runPreparedThreeDJob
+} from "./prepare-3d-runner";
 import { SettingsStore } from "../shared/settings-store";
 
 interface RouterDeps {
@@ -25,6 +54,10 @@ interface RouterDeps {
 }
 
 const recentMainWorldEventsByTab = new Map<number, MainWorldEvent[]>();
+const runningDownloadJobs = new Set<string>();
+const runningUploadJobs = new Set<string>();
+const runningRewriteJobs = new Set<string>();
+const runningPrepare3dJobs = new Set<string>();
 
 export function createMessageRouter(deps: Partial<RouterDeps> = {}) {
   const jobStore = deps.jobStore ?? createJobStore();
@@ -92,6 +125,41 @@ export function createMessageRouter(deps: Partial<RouterDeps> = {}) {
       case EXTENSION_MESSAGE_TYPES.cancelDownloads:
         return cancelDownloads(message.payload as CancelDownloadsRequest | undefined, jobStore);
 
+      case EXTENSION_MESSAGE_TYPES.startUploads:
+      case EXTENSION_MESSAGE_TYPES.resumeUploads:
+        return startUploads(
+          message.payload as StartUploadsRequest | ResumeUploadsRequest | undefined,
+          jobStore,
+          blobStore,
+          settingsStore
+        );
+
+      case EXTENSION_MESSAGE_TYPES.getUploadProgress:
+        return getUploadProgress(message.payload as GetUploadProgressRequest | undefined, jobStore);
+
+      case EXTENSION_MESSAGE_TYPES.cancelUploads:
+        return cancelUploads(message.payload as CancelUploadsRequest | undefined, jobStore);
+
+      case EXTENSION_MESSAGE_TYPES.generateAppHtml:
+        return generateAppHtml(message.payload as GenerateAppHtmlRequest | undefined, jobStore, blobStore, settingsStore);
+
+      case EXTENSION_MESSAGE_TYPES.getRewriteProgress:
+        return getRewriteProgress(message.payload as GetRewriteProgressRequest | undefined, jobStore);
+
+      case EXTENSION_MESSAGE_TYPES.prepare3dAssets:
+        return prepare3dAssets(
+          message.payload as Prepare3dAssetsRequest | undefined,
+          jobStore,
+          blobStore,
+          settingsStore
+        );
+
+      case EXTENSION_MESSAGE_TYPES.getPrepare3dProgress:
+        return getPrepare3dProgress(message.payload as GetPrepare3dProgressRequest | undefined, jobStore);
+
+      case EXTENSION_MESSAGE_TYPES.cancelPrepare3d:
+        return cancelPrepare3d(message.payload as CancelPrepare3dRequest | undefined, jobStore);
+
       default:
         return {
           ok: false,
@@ -99,6 +167,257 @@ export function createMessageRouter(deps: Partial<RouterDeps> = {}) {
           type: message.type
         };
     }
+  };
+}
+
+async function prepare3dAssets(
+  request: Prepare3dAssetsRequest | undefined,
+  jobStore: JobStore,
+  blobStore: BlobStoreLike,
+  settingsStore: SettingsStore
+) {
+  const currentJob = request?.jobId ? await jobStore.getJob(request.jobId) : await jobStore.getLatestJob();
+  const summaryBeforeStart = await buildJobSummary(jobStore, currentJob?.id);
+
+  if (!currentJob) {
+    return {
+      ok: false,
+      error: "job_not_found",
+      summary: summaryBeforeStart
+    };
+  }
+
+  if (currentJob.status === "preparing-3d" && runningPrepare3dJobs.has(currentJob.id)) {
+    return {
+      ok: true,
+      job: summaryBeforeStart.job,
+      report: summaryBeforeStart.job?.threeDPreparationReport,
+      summary: summaryBeforeStart
+    };
+  }
+
+  const settings = await settingsStore.get();
+  const deps = {
+    jobStore,
+    blobStore,
+    options: {
+      endpoint: settings.catboxUploadEndpoint,
+      timeoutMs: settings.uploadTimeoutMs,
+      maxAttempts: settings.maxUploadAttempts,
+      force: Boolean(request?.force)
+    }
+  };
+  const summary = await prepareThreeDJob(currentJob.id, deps);
+
+  if (summary.job?.status === "preparing-3d" && !runningPrepare3dJobs.has(summary.job.id)) {
+    const runJobId = summary.job.id;
+    runningPrepare3dJobs.add(runJobId);
+    void runPreparedThreeDJob(runJobId, deps)
+      .catch((error: unknown) => markPrepare3dRunFailed(runJobId, jobStore, error))
+      .finally(() => {
+        runningPrepare3dJobs.delete(runJobId);
+      });
+  }
+
+  return {
+    ok: Boolean(summary.job),
+    job: summary.job,
+    report: summary.job?.threeDPreparationReport,
+    summary
+  };
+}
+
+async function getPrepare3dProgress(
+  request: GetPrepare3dProgressRequest | undefined,
+  jobStore: JobStore
+) {
+  const summary = await buildJobSummary(jobStore, request?.jobId);
+  const report = summary.job?.id ? await jobStore.getThreeDPreparationReport(summary.job.id) : undefined;
+
+  return {
+    ok: true,
+    job: summary.job,
+    report,
+    threeDReport: report,
+    summary
+  };
+}
+
+async function cancelPrepare3d(
+  request: CancelPrepare3dRequest | undefined,
+  jobStore: JobStore
+) {
+  if (!request?.jobId) {
+    return {
+      ok: false,
+      error: "job_id_required"
+    };
+  }
+
+  const job = await jobStore.setJobStatus(request.jobId, "cancelled");
+  const summary = await buildJobSummary(jobStore, request.jobId);
+
+  return {
+    ok: Boolean(job),
+    job,
+    summary
+  };
+}
+
+async function generateAppHtml(
+  request: GenerateAppHtmlRequest | undefined,
+  jobStore: JobStore,
+  blobStore: BlobStoreLike,
+  settingsStore: SettingsStore
+) {
+  const currentJob = request?.jobId ? await jobStore.getJob(request.jobId) : await jobStore.getLatestJob();
+  const summaryBeforeStart = await buildJobSummary(jobStore, currentJob?.id);
+
+  if (!currentJob) {
+    return {
+      ok: false,
+      error: "job_not_found",
+      summary: summaryBeforeStart
+    };
+  }
+
+  if (currentJob.status === "rewriting" && runningRewriteJobs.has(currentJob.id)) {
+    return {
+      ok: true,
+      job: summaryBeforeStart.job,
+      report: summaryBeforeStart.job?.rewriteReport,
+      summary: summaryBeforeStart
+    };
+  }
+
+  const settings = await settingsStore.get();
+  const deps = {
+    jobStore,
+    blobStore,
+    settings
+  };
+  const summary = await prepareRewriteJob(currentJob.id, deps);
+
+  if (summary.job?.status === "rewriting" && !runningRewriteJobs.has(summary.job.id)) {
+    const runJobId = summary.job.id;
+    runningRewriteJobs.add(runJobId);
+    void runPreparedRewriteJob(runJobId, deps)
+      .catch((error: unknown) => markRewriteRunFailed(runJobId, jobStore, error))
+      .finally(() => {
+        runningRewriteJobs.delete(runJobId);
+      });
+  }
+
+  return {
+    ok: Boolean(summary.job),
+    job: summary.job,
+    report: summary.job?.rewriteReport,
+    summary
+  };
+}
+
+async function getRewriteProgress(
+  request: GetRewriteProgressRequest | undefined,
+  jobStore: JobStore
+) {
+  const summary = await buildJobSummary(jobStore, request?.jobId);
+
+  return {
+    ok: true,
+    job: summary.job,
+    report: summary.job?.rewriteReport,
+    summary
+  };
+}
+
+async function startUploads(
+  request: StartUploadsRequest | ResumeUploadsRequest | undefined,
+  jobStore: JobStore,
+  blobStore: BlobStoreLike,
+  settingsStore: SettingsStore
+) {
+  const currentJob = request?.jobId ? await jobStore.getJob(request.jobId) : await jobStore.getLatestJob();
+  const summaryBeforeStart = await buildJobSummary(jobStore, currentJob?.id);
+
+  if (!currentJob) {
+    return {
+      ok: false,
+      error: "job_not_found",
+      summary: summaryBeforeStart
+    };
+  }
+
+  if (currentJob.status === "uploading" && runningUploadJobs.has(currentJob.id)) {
+    return {
+      ok: true,
+      job: summaryBeforeStart.job,
+      summary: summaryBeforeStart
+    };
+  }
+
+  const settings = await settingsStore.get();
+  const runnerDeps = {
+    jobStore,
+    blobStore,
+    options: {
+      concurrency: settings.uploadConcurrency,
+      timeoutMs: settings.uploadTimeoutMs,
+      maxAttempts: settings.maxUploadAttempts,
+      endpoint: settings.catboxUploadEndpoint
+    }
+  };
+  const summary = await prepareAssetUploads(currentJob.id, runnerDeps);
+
+  if (summary.job?.status === "uploading" && !runningUploadJobs.has(summary.job.id)) {
+    const runJobId = summary.job.id;
+    runningUploadJobs.add(runJobId);
+    void runPreparedAssetUploads(runJobId, runnerDeps)
+      .catch((error: unknown) => markUploadRunFailed(runJobId, jobStore, error))
+      .finally(() => {
+        runningUploadJobs.delete(runJobId);
+      });
+  }
+
+  return {
+    ok: Boolean(summary.job),
+    job: summary.job,
+    summary
+  };
+}
+
+async function getUploadProgress(
+  request: GetUploadProgressRequest | undefined,
+  jobStore: JobStore
+) {
+  const summary = await buildJobSummary(jobStore, request?.jobId);
+
+  return {
+    ok: true,
+    job: summary.job,
+    assets: summary.assets,
+    summary
+  };
+}
+
+async function cancelUploads(
+  request: CancelUploadsRequest | undefined,
+  jobStore: JobStore
+) {
+  if (!request?.jobId) {
+    return {
+      ok: false,
+      error: "job_id_required"
+    };
+  }
+
+  const job = await jobStore.setJobStatus(request.jobId, "cancelled");
+  await jobStore.updateJobStats(request.jobId);
+  const summary = await buildJobSummary(jobStore, request.jobId);
+
+  return {
+    ok: Boolean(job),
+    job,
+    summary
   };
 }
 
@@ -158,6 +477,18 @@ async function startCapture(
     };
 
     await jobStore.putAssets(job.id, assets);
+    if (result.htmlSnapshot) {
+      await jobStore.putHtmlSnapshot({
+        id: `html:${job.id}`,
+        jobId: job.id,
+        html: result.htmlSnapshot.html,
+        doctype: result.htmlSnapshot.doctype,
+        pageUrl: result.htmlSnapshot.documentUrl,
+        baseUrl: result.htmlSnapshot.baseUrl,
+        title: result.htmlSnapshot.title,
+        capturedAt: result.htmlSnapshot.capturedAt
+      });
+    }
     await jobStore.putJob({
       ...job,
       pageUrl: result.pageUrl || job.pageUrl,
@@ -201,8 +532,18 @@ async function startDownloads(
   blobStore: BlobStoreLike,
   settingsStore: SettingsStore
 ) {
+  const currentJob = request?.jobId ? await jobStore.getJob(request.jobId) : await jobStore.getLatestJob();
+  if (currentJob?.status === "downloading" && runningDownloadJobs.has(currentJob.id)) {
+    const summary = await buildJobSummary(jobStore, currentJob.id);
+    return {
+      ok: true,
+      job: summary.job,
+      summary
+    };
+  }
+
   const settings = await settingsStore.get();
-  const summary = await startAssetDownloads(request?.jobId, {
+  const runnerDeps = {
     jobStore,
     blobStore,
     options: {
@@ -210,7 +551,18 @@ async function startDownloads(
       timeoutMs: settings.downloadTimeoutMs,
       maxAttempts: settings.maxDownloadAttempts
     }
-  });
+  };
+  const summary = await prepareAssetDownloads(request?.jobId, runnerDeps);
+
+  if (summary.job && !runningDownloadJobs.has(summary.job.id)) {
+    const runJobId = summary.job.id;
+    runningDownloadJobs.add(runJobId);
+    void runPreparedAssetDownloads(runJobId, runnerDeps)
+      .catch((error: unknown) => markDownloadRunFailed(runJobId, jobStore, error))
+      .finally(() => {
+        runningDownloadJobs.delete(runJobId);
+      });
+  }
 
   return {
     ok: Boolean(summary.job),
@@ -338,7 +690,9 @@ function mainWorldEventToDiscovery(event: MainWorldEvent, baseUrl: string): Asse
             ? ["xhr-hook"]
             : event.kind === "worker"
               ? ["worker-hook"]
-              : ["image-hook"],
+              : event.kind === "wasm-streaming"
+                ? ["script"]
+                : ["image-hook"],
       frameUrl: event.pageUrl,
       element: event.kind,
       attribute: "url",
@@ -372,7 +726,8 @@ function emptyStats(): JobStats {
     skippedAssets: 0,
     totalBytes: 0,
     downloadedBytes: 0,
-    uploadedAssets: 0
+    uploadedAssets: 0,
+    totalUploadedBytes: 0
   };
 }
 

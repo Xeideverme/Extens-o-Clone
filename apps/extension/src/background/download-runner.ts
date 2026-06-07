@@ -31,6 +31,16 @@ const DEFAULT_RUNNER_OPTIONS: DownloadRunnerOptions = {
 const ELIGIBLE_STATUSES = new Set(["discovered", "queued", "downloading", "failed"]);
 
 export async function startAssetDownloads(jobId: string | undefined, deps: DownloadRunnerDeps): Promise<JobSummary> {
+  const prepared = await prepareAssetDownloads(jobId, deps);
+  if (!prepared.job) {
+    return prepared;
+  }
+
+  await runPreparedAssetDownloads(prepared.job.id, deps);
+  return buildJobSummary(deps.jobStore, prepared.job.id);
+}
+
+export async function prepareAssetDownloads(jobId: string | undefined, deps: DownloadRunnerDeps): Promise<JobSummary> {
   const job = jobId ? await deps.jobStore.getJob(jobId) : await deps.jobStore.getLatestJob();
   if (!job) {
     return {
@@ -39,7 +49,6 @@ export async function startAssetDownloads(jobId: string | undefined, deps: Downl
     };
   }
 
-  const options = normalizeOptions(deps.options);
   await deps.jobStore.setJobStatus(job.id, "downloading");
 
   const allAssets = await deps.jobStore.getAssetsByJob(job.id);
@@ -55,17 +64,63 @@ export async function startAssetDownloads(jobId: string | undefined, deps: Downl
   );
   await deps.jobStore.updateJobStats(job.id);
 
+  return buildJobSummary(deps.jobStore, job.id);
+}
+
+export async function runPreparedAssetDownloads(jobId: string, deps: DownloadRunnerDeps): Promise<JobSummary> {
+  const job = await deps.jobStore.getJob(jobId);
+  if (!job) {
+    return {
+      assets: [],
+      domains: []
+    };
+  }
+
+  const options = normalizeOptions(deps.options);
+  const eligibleAssets = await deps.jobStore.getAssetsByStatus(job.id, ["queued", "downloading", "failed"]);
+
   await runQueue(eligibleAssets, options.concurrency, async (asset) => {
     const currentJob = await deps.jobStore.getJob(job.id);
     if (currentJob?.status === "cancelled") {
       return;
     }
 
-    await processAsset(asset.id, deps, options);
+    try {
+      await processAsset(asset.id, deps, options);
+    } catch (error) {
+      await deps.jobStore.updateAsset(asset.id, {
+        status: "failed",
+        lastError: errorToMessage(error)
+      });
+      await deps.jobStore.updateJobStats(job.id);
+    }
   });
 
   await finalizeJob(job.id, deps.jobStore);
   return buildJobSummary(deps.jobStore, job.id);
+}
+
+export async function markDownloadRunFailed(jobId: string, jobStore: JobStore, error: unknown): Promise<void> {
+  const job = await jobStore.getJob(jobId);
+  if (!job || job.status === "cancelled") {
+    return;
+  }
+
+  const stats = await jobStore.recomputeJobStats(jobId);
+  const hasPartialSuccess = stats.downloadedAssets + stats.skippedAssets > 0;
+
+  await jobStore.updateJob(jobId, {
+    status: hasPartialSuccess ? "partially-downloaded" : "failed",
+    stats,
+    errors: [
+      ...job.errors,
+      {
+        code: "download_runner_failed",
+        message: error instanceof Error ? error.message : String(error),
+        createdAt: Date.now()
+      }
+    ]
+  });
 }
 
 export async function buildJobSummary(jobStore: JobStore, jobId?: string): Promise<JobSummary> {
@@ -251,4 +306,8 @@ function collectDomains(assets: AssetRecord[]): string[] {
   }
 
   return [...domains].sort();
+}
+
+function errorToMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

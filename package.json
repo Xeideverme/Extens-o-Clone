@@ -8,7 +8,7 @@
     "build": "pnpm -r --if-present build",
     "build:extension": "pnpm --filter @clone3d/extension build",
     "build:worker": "pnpm --filter @clone3d/shared build && pnpm --filter @clone3d/worker build",
-    "typecheck": "pnpm --filter @clone3d/shared build && pnpm --filter @clone3d/storage build && pnpm -r --if-present typecheck"
+    "typecheck": "pnpm --filter @clone3d/shared build && pnpm --filter @clone3d/storage build && pnpm --filter @clone3d/rewriter build && pnpm -r --if-present typecheck"
   },
   "devDependencies": {
     "@types/chrome": "^0.1.33",

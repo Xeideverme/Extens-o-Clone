@@ -10,7 +10,9 @@ const ATTRIBUTE_SELECTORS = [
   { selector: "[data-model]", attribute: "data-model", source: "dom" },
   { selector: "[data-model-src]", attribute: "data-model-src", source: "dom" },
   { selector: "[ar-src]", attribute: "ar-src", source: "dom" },
-  { selector: "[ios-src]", attribute: "ios-src", source: "dom" }
+  { selector: "[ios-src]", attribute: "ios-src", source: "dom" },
+  { selector: "[environment-image]", attribute: "environment-image", source: "dom" },
+  { selector: "[skybox-image]", attribute: "skybox-image", source: "dom" }
 ] satisfies Array<{ selector: string; attribute: string; source: AssetSource }>;
 
 const SRCSET_SELECTORS = [

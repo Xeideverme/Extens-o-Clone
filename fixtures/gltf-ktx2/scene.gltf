@@ -1,0 +1,27 @@
+{
+  "asset": {
+    "version": "2.0",
+    "generator": "Clone3D KTX2 fixture"
+  },
+  "extensionsUsed": ["KHR_texture_basisu"],
+  "buffers": [
+    {
+      "uri": "scene.bin",
+      "byteLength": 4
+    }
+  ],
+  "images": [
+    {
+      "uri": "textures/albedo.ktx2"
+    }
+  ],
+  "textures": [
+    {
+      "extensions": {
+        "KHR_texture_basisu": {
+          "source": 0
+        }
+      }
+    }
+  ]
+}

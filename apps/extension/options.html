@@ -14,12 +14,8 @@
       </header>
       <form id="settings-form">
         <label>
-          Worker endpoint
-          <input id="worker-endpoint" name="workerEndpoint" type="url" placeholder="https://worker.example.com" />
-        </label>
-        <label>
-          Public assets base URL
-          <input id="public-base-url" name="publicBaseUrl" type="url" placeholder="https://assets.example.com" />
+          Catbox upload endpoint
+          <input id="catbox-upload-endpoint" name="catboxUploadEndpoint" type="url" value="https://catbox.moe/user/api.php" />
         </label>
         <label>
           Inline threshold KB
@@ -36,6 +32,30 @@
         <label>
           Max download attempts
           <input id="max-download-attempts" name="maxDownloadAttempts" type="number" min="1" step="1" value="3" />
+        </label>
+        <label>
+          Upload concurrency
+          <input id="upload-concurrency" name="uploadConcurrency" type="number" min="1" step="1" value="24" />
+        </label>
+        <label>
+          Upload timeout ms
+          <input id="upload-timeout" name="uploadTimeoutMs" type="number" min="1000" step="1000" value="60000" />
+        </label>
+        <label>
+          Max upload attempts
+          <input id="max-upload-attempts" name="maxUploadAttempts" type="number" min="1" step="1" value="3" />
+        </label>
+        <label class="checkbox-row">
+          <input id="generate-html-save-as" name="generateHtmlSaveAs" type="checkbox" checked />
+          Save as ao gerar app.html
+        </label>
+        <label class="checkbox-row">
+          <input id="include-rewrite-report" name="includeRewriteReportInHtml" type="checkbox" checked />
+          Incluir relatorio no app.html
+        </label>
+        <label class="checkbox-row">
+          <input id="runtime-resolver-enabled" name="runtimeResolverEnabled" type="checkbox" checked />
+          Incluir runtime resolver
         </label>
         <button type="submit">Salvar</button>
       </form>

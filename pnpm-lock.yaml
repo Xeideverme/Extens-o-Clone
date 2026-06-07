@@ -26,6 +26,9 @@ importers:
 
   apps/extension:
     dependencies:
+      '@clone3d/rewriter':
+        specifier: workspace:*
+        version: link:../../packages/rewriter
       '@clone3d/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -38,6 +41,12 @@ importers:
       '@clone3d/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+
+  packages/rewriter:
+    dependencies:
+      '@clone3d/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   packages/shared: {}
 

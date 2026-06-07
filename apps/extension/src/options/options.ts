@@ -1,12 +1,17 @@
 import { SettingsStore } from "../shared/settings-store";
 
 const form = document.querySelector<HTMLFormElement>("#settings-form");
-const endpointInput = document.querySelector<HTMLInputElement>("#worker-endpoint");
-const publicBaseInput = document.querySelector<HTMLInputElement>("#public-base-url");
+const catboxUploadEndpointInput = document.querySelector<HTMLInputElement>("#catbox-upload-endpoint");
 const thresholdInput = document.querySelector<HTMLInputElement>("#inline-threshold");
 const downloadConcurrencyInput = document.querySelector<HTMLInputElement>("#download-concurrency");
 const downloadTimeoutInput = document.querySelector<HTMLInputElement>("#download-timeout");
 const maxDownloadAttemptsInput = document.querySelector<HTMLInputElement>("#max-download-attempts");
+const uploadConcurrencyInput = document.querySelector<HTMLInputElement>("#upload-concurrency");
+const uploadTimeoutInput = document.querySelector<HTMLInputElement>("#upload-timeout");
+const maxUploadAttemptsInput = document.querySelector<HTMLInputElement>("#max-upload-attempts");
+const generateHtmlSaveAsInput = document.querySelector<HTMLInputElement>("#generate-html-save-as");
+const includeRewriteReportInput = document.querySelector<HTMLInputElement>("#include-rewrite-report");
+const runtimeResolverEnabledInput = document.querySelector<HTMLInputElement>("#runtime-resolver-enabled");
 const saveStatus = document.querySelector<HTMLParagraphElement>("#save-status");
 const settingsStore = new SettingsStore();
 
@@ -20,12 +25,8 @@ form?.addEventListener("submit", (event) => {
 async function loadSettings(): Promise<void> {
   const settings = await settingsStore.get();
 
-  if (endpointInput) {
-    endpointInput.value = settings.workerEndpoint;
-  }
-
-  if (publicBaseInput) {
-    publicBaseInput.value = settings.publicBaseUrl;
+  if (catboxUploadEndpointInput) {
+    catboxUploadEndpointInput.value = settings.catboxUploadEndpoint;
   }
 
   if (thresholdInput) {
@@ -43,16 +44,45 @@ async function loadSettings(): Promise<void> {
   if (maxDownloadAttemptsInput) {
     maxDownloadAttemptsInput.value = String(settings.maxDownloadAttempts);
   }
+
+  if (uploadConcurrencyInput) {
+    uploadConcurrencyInput.value = String(settings.uploadConcurrency);
+  }
+
+  if (uploadTimeoutInput) {
+    uploadTimeoutInput.value = String(settings.uploadTimeoutMs);
+  }
+
+  if (maxUploadAttemptsInput) {
+    maxUploadAttemptsInput.value = String(settings.maxUploadAttempts);
+  }
+
+  if (generateHtmlSaveAsInput) {
+    generateHtmlSaveAsInput.checked = settings.generateHtmlSaveAs;
+  }
+
+  if (includeRewriteReportInput) {
+    includeRewriteReportInput.checked = settings.includeRewriteReportInHtml;
+  }
+
+  if (runtimeResolverEnabledInput) {
+    runtimeResolverEnabledInput.checked = settings.runtimeResolverEnabled;
+  }
 }
 
 async function saveSettings(): Promise<void> {
   await settingsStore.set({
-    workerEndpoint: endpointInput?.value.trim() ?? "",
-    publicBaseUrl: publicBaseInput?.value.trim() ?? "",
+    catboxUploadEndpoint: catboxUploadEndpointInput?.value.trim() ?? "",
     inlineThresholdKb: Number(thresholdInput?.value || 50),
     downloadConcurrency: Number(downloadConcurrencyInput?.value || 4),
     downloadTimeoutMs: Number(downloadTimeoutInput?.value || 30000),
-    maxDownloadAttempts: Number(maxDownloadAttemptsInput?.value || 3)
+    maxDownloadAttempts: Number(maxDownloadAttemptsInput?.value || 3),
+    uploadConcurrency: Number(uploadConcurrencyInput?.value || 24),
+    uploadTimeoutMs: Number(uploadTimeoutInput?.value || 60000),
+    maxUploadAttempts: Number(maxUploadAttemptsInput?.value || 3),
+    generateHtmlSaveAs: Boolean(generateHtmlSaveAsInput?.checked),
+    includeRewriteReportInHtml: Boolean(includeRewriteReportInput?.checked),
+    runtimeResolverEnabled: Boolean(runtimeResolverEnabledInput?.checked)
   });
 
   if (saveStatus) {

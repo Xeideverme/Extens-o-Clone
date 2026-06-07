@@ -45,6 +45,12 @@ label {
   font-weight: 600;
 }
 
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 input {
   min-height: 38px;
   box-sizing: border-box;
@@ -52,6 +58,10 @@ input {
   border-radius: 8px;
   padding: 8px 10px;
   font: inherit;
+}
+
+input[type="checkbox"] {
+  min-height: 0;
 }
 
 button {

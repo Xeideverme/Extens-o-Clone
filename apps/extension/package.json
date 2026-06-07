@@ -8,6 +8,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@clone3d/rewriter": "workspace:*",
     "@clone3d/shared": "workspace:*",
     "@clone3d/storage": "workspace:*"
   },

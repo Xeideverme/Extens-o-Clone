@@ -23,6 +23,18 @@ export type DownloadResult =
     };
 
 export async function downloadAsset(asset: AssetRecord, options: DownloadOptions): Promise<DownloadResult> {
+  try {
+    return await downloadAssetInternal(asset, options);
+  } catch (error) {
+    return {
+      ok: false,
+      error: errorToMessage(error),
+      retryable: true
+    };
+  }
+}
+
+async function downloadAssetInternal(asset: AssetRecord, options: DownloadOptions): Promise<DownloadResult> {
   const urlCheck = isDownloadableAssetUrl(asset.normalizedUrl);
   if (!urlCheck.downloadable) {
     return {
@@ -83,31 +95,41 @@ export async function downloadAsset(asset: AssetRecord, options: DownloadOptions
 }
 
 function decodeDataUrl(value: string): DownloadResult {
-  const match = value.match(/^data:([^,]*?),(.*)$/s);
-  if (!match) {
+  try {
+    const match = value.match(/^data:([^,]*?),(.*)$/s);
+    if (!match) {
+      return {
+        ok: false,
+        error: "invalid-data-url",
+        skipped: true,
+        skippedReason: "invalid-data-url",
+        retryable: false
+      };
+    }
+
+    const meta = match[1] || "text/plain;charset=US-ASCII";
+    const body = match[2] || "";
+    const isBase64 = /(?:^|;)base64(?:;|$)/i.test(meta);
+    const contentType = normalizeContentType(meta.replace(/;base64$/i, "")) || "text/plain;charset=US-ASCII";
+    const bytes = isBase64 ? base64ToBytes(body) : percentEncodedToBytes(body);
+    const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    const blob = new Blob([buffer], { type: contentType });
+
+    return {
+      ok: true,
+      blob,
+      contentType,
+      size: blob.size
+    };
+  } catch (error) {
     return {
       ok: false,
-      error: "invalid-data-url",
+      error: `invalid-data-url: ${errorToMessage(error)}`,
       skipped: true,
       skippedReason: "invalid-data-url",
       retryable: false
     };
   }
-
-  const meta = match[1] || "text/plain;charset=US-ASCII";
-  const body = match[2] || "";
-  const isBase64 = /(?:^|;)base64(?:;|$)/i.test(meta);
-  const contentType = normalizeContentType(meta.replace(/;base64$/i, "")) || "text/plain;charset=US-ASCII";
-  const bytes = isBase64 ? base64ToBytes(body) : percentEncodedToBytes(body);
-  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-  const blob = new Blob([buffer], { type: contentType });
-
-  return {
-    ok: true,
-    blob,
-    contentType,
-    size: blob.size
-  };
 }
 
 function isRetryableHttpStatus(status: number): boolean {
@@ -124,17 +146,25 @@ function errorToMessage(error: unknown): string {
 }
 
 function base64ToBytes(value: string): Uint8Array {
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
+  try {
+    const binary = atob(value);
+    const bytes = new Uint8Array(binary.length);
 
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+
+    return bytes;
+  } catch (error) {
+    throw new Error(`invalid-base64: ${errorToMessage(error)}`);
   }
-
-  return bytes;
 }
 
 function percentEncodedToBytes(value: string): Uint8Array {
-  const decoded = decodeURIComponent(value.replace(/\+/g, "%20"));
-  return new TextEncoder().encode(decoded);
+  try {
+    const decoded = decodeURIComponent(value.replace(/\+/g, "%20"));
+    return new TextEncoder().encode(decoded);
+  } catch (error) {
+    throw new Error(`invalid-percent-encoding: ${errorToMessage(error)}`);
+  }
 }

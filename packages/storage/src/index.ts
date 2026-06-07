@@ -1,4 +1,14 @@
-import type { AssetRecord, AssetStatus, BlobRecord, JobRecord, JobStats, JobStatus } from "@clone3d/shared";
+import type {
+  AssetRecord,
+  AssetStatus,
+  BlobRecord,
+  GeneratedOutputRecord,
+  HtmlSnapshotRecord,
+  JobRecord,
+  JobStats,
+  JobStatus,
+  ThreeDPreparationReport
+} from "@clone3d/shared";
 
 export type JobPatch = Partial<Omit<JobRecord, "id">>;
 export type AssetPatch = Partial<Omit<AssetRecord, "id" | "jobId">>;
@@ -23,6 +33,16 @@ export interface JobStore {
   bulkUpdateAssets(assetIds: string[], patch: AssetPatch): Promise<void>;
   getAssetsByStatus(jobId: string, statuses: AssetStatus[]): Promise<AssetRecord[]>;
   clearAssets(jobId: string): Promise<void>;
+  putHtmlSnapshot(snapshot: HtmlSnapshotRecord): Promise<void>;
+  getHtmlSnapshot(jobId: string): Promise<HtmlSnapshotRecord | undefined>;
+  putGeneratedOutput(output: GeneratedOutputRecord): Promise<void>;
+  getLatestGeneratedOutput(jobId: string): Promise<GeneratedOutputRecord | undefined>;
+  saveThreeDPreparationReport(report: ThreeDPreparationReport): Promise<void>;
+  getThreeDPreparationReport(jobId: string): Promise<ThreeDPreparationReport | undefined>;
+  updateThreeDPreparationReport(
+    jobId: string,
+    patch: Partial<Omit<ThreeDPreparationReport, "jobId">>
+  ): Promise<ThreeDPreparationReport | undefined>;
 }
 
 export interface BlobStoreLike {
@@ -32,6 +52,9 @@ export interface BlobStoreLike {
     contentType: string;
     originalUrl?: string;
     normalizedUrl?: string;
+    derivedFromAssetId?: string;
+    derivedKind?: BlobRecord["derivedKind"];
+    filename?: string;
   }): Promise<BlobRecord>;
   getBlob(blobId: string): Promise<Blob | undefined>;
   getBlobRecord(blobId: string): Promise<BlobRecord | undefined>;
@@ -45,6 +68,9 @@ type StoredBlobRecord = BlobRecord & { blob: Blob };
 export class MemoryJobStore implements JobStore {
   private readonly jobs = new Map<string, JobRecord>();
   private readonly assets = new Map<string, AssetRecord>();
+  private readonly htmlSnapshots = new Map<string, HtmlSnapshotRecord>();
+  private readonly outputs = new Map<string, GeneratedOutputRecord>();
+  private readonly threeDReports = new Map<string, ThreeDPreparationReport>();
 
   async get(jobId: string): Promise<JobRecord | undefined> {
     return this.getJob(jobId);
@@ -85,6 +111,13 @@ export class MemoryJobStore implements JobStore {
   async delete(jobId: string): Promise<void> {
     this.jobs.delete(jobId);
     await this.clearAssets(jobId);
+    this.htmlSnapshots.delete(jobId);
+    this.threeDReports.delete(jobId);
+    for (const output of [...this.outputs.values()]) {
+      if (output.jobId === jobId) {
+        this.outputs.delete(output.id);
+      }
+    }
   }
 
   async setJobStatus(jobId: string, status: JobStatus): Promise<JobRecord | undefined> {
@@ -148,6 +181,70 @@ export class MemoryJobStore implements JobStore {
       }
     }
   }
+
+  async putHtmlSnapshot(snapshot: HtmlSnapshotRecord): Promise<void> {
+    this.htmlSnapshots.set(snapshot.jobId, cloneHtmlSnapshot(snapshot));
+  }
+
+  async getHtmlSnapshot(jobId: string): Promise<HtmlSnapshotRecord | undefined> {
+    const snapshot = this.htmlSnapshots.get(jobId);
+    return snapshot ? cloneHtmlSnapshot(snapshot) : undefined;
+  }
+
+  async putGeneratedOutput(output: GeneratedOutputRecord): Promise<void> {
+    this.outputs.set(output.id, cloneGeneratedOutput(output));
+  }
+
+  async getLatestGeneratedOutput(jobId: string): Promise<GeneratedOutputRecord | undefined> {
+    return [...this.outputs.values()]
+      .filter((output) => output.jobId === jobId)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map(cloneGeneratedOutput)[0];
+  }
+
+  async saveThreeDPreparationReport(report: ThreeDPreparationReport): Promise<void> {
+    this.threeDReports.set(report.jobId, cloneThreeDReport(report));
+    await this.updateJob(report.jobId, { threeDPreparationReport: report });
+  }
+
+  async getThreeDPreparationReport(jobId: string): Promise<ThreeDPreparationReport | undefined> {
+    const report = this.threeDReports.get(jobId);
+    if (report) {
+      return cloneThreeDReport(report);
+    }
+
+    const job = await this.getJob(jobId);
+    return job?.threeDPreparationReport ? cloneThreeDReport(job.threeDPreparationReport) : undefined;
+  }
+
+  async updateThreeDPreparationReport(
+    jobId: string,
+    patch: Partial<Omit<ThreeDPreparationReport, "jobId">>
+  ): Promise<ThreeDPreparationReport | undefined> {
+    const current =
+      (await this.getThreeDPreparationReport(jobId)) ??
+      ({
+        jobId,
+        startedAt: Date.now(),
+        detected3dAssets: 0,
+        gltfFilesAnalyzed: 0,
+        gltfFilesRewritten: 0,
+        derivedAssetsCreated: 0,
+        derivedAssetsUploaded: 0,
+        decoderAssetsDetected: 0,
+        workerAssetsDetected: 0,
+        wasmAssetsDetected: 0,
+        textureAssetsDetected: 0,
+        unresolvedGltfUris: [],
+        unresolvedDecoderUrls: [],
+        unresolvedWorkerUrls: [],
+        warnings: [],
+        errors: []
+      } satisfies ThreeDPreparationReport);
+    const updated = mergeThreeDReport(current, patch);
+    await this.saveThreeDPreparationReport(updated);
+    return updated;
+  }
 }
 
 export class MemoryBlobStore implements BlobStoreLike {
@@ -160,6 +257,9 @@ export class MemoryBlobStore implements BlobStoreLike {
     contentType: string;
     originalUrl?: string;
     normalizedUrl?: string;
+    derivedFromAssetId?: string;
+    derivedKind?: BlobRecord["derivedKind"];
+    filename?: string;
   }): Promise<BlobRecord> {
     const existingId = this.byHash.get(params.sha256);
     if (existingId) {
@@ -178,6 +278,9 @@ export class MemoryBlobStore implements BlobStoreLike {
       contentType: params.contentType,
       originalUrl: params.originalUrl,
       normalizedUrl: params.normalizedUrl,
+      derivedFromAssetId: params.derivedFromAssetId,
+      derivedKind: params.derivedKind,
+      filename: params.filename,
       createdAt: now,
       updatedAt: now,
       blob: params.blob
@@ -216,10 +319,13 @@ export class MemoryBlobStore implements BlobStoreLike {
 }
 
 const DB_NAME = "clone3d-snapshot";
-const DB_VERSION = 2;
+const DB_VERSION = 4;
 const JOBS_STORE = "jobs";
 const ASSETS_STORE = "assets";
 const BLOBS_STORE = "blobs";
+const HTML_SNAPSHOTS_STORE = "htmlSnapshots";
+const OUTPUTS_STORE = "outputs";
+const THREE_D_REPORTS_STORE = "threeDReports";
 const JOB_ID_INDEX = "jobId";
 const SHA256_INDEX = "sha256";
 
@@ -274,9 +380,15 @@ export class IndexedDbJobStore implements JobStore {
 
   async delete(jobId: string): Promise<void> {
     const db = await openCloneDb();
-    const tx = db.transaction([JOBS_STORE, ASSETS_STORE], "readwrite");
+    const tx = db.transaction(
+      [JOBS_STORE, ASSETS_STORE, HTML_SNAPSHOTS_STORE, OUTPUTS_STORE, THREE_D_REPORTS_STORE],
+      "readwrite"
+    );
     tx.objectStore(JOBS_STORE).delete(jobId);
     await deleteAssetsForJob(tx.objectStore(ASSETS_STORE), jobId);
+    tx.objectStore(HTML_SNAPSHOTS_STORE).delete(jobId);
+    await deleteRecordsForJob(tx.objectStore(OUTPUTS_STORE), jobId);
+    tx.objectStore(THREE_D_REPORTS_STORE).delete(jobId);
     await transactionDone(tx);
   }
 
@@ -365,6 +477,95 @@ export class IndexedDbJobStore implements JobStore {
     await deleteAssetsForJob(tx.objectStore(ASSETS_STORE), jobId);
     await transactionDone(tx);
   }
+
+  async putHtmlSnapshot(snapshot: HtmlSnapshotRecord): Promise<void> {
+    const db = await openCloneDb();
+    const tx = db.transaction(HTML_SNAPSHOTS_STORE, "readwrite");
+    tx.objectStore(HTML_SNAPSHOTS_STORE).put(snapshot);
+    await transactionDone(tx);
+  }
+
+  async getHtmlSnapshot(jobId: string): Promise<HtmlSnapshotRecord | undefined> {
+    const db = await openCloneDb();
+    return requestToPromise<HtmlSnapshotRecord | undefined>(
+      db.transaction(HTML_SNAPSHOTS_STORE, "readonly").objectStore(HTML_SNAPSHOTS_STORE).get(jobId)
+    );
+  }
+
+  async putGeneratedOutput(output: GeneratedOutputRecord): Promise<void> {
+    const db = await openCloneDb();
+    const tx = db.transaction(OUTPUTS_STORE, "readwrite");
+    tx.objectStore(OUTPUTS_STORE).put(output);
+    await transactionDone(tx);
+  }
+
+  async getLatestGeneratedOutput(jobId: string): Promise<GeneratedOutputRecord | undefined> {
+    const db = await openCloneDb();
+    const tx = db.transaction(OUTPUTS_STORE, "readonly");
+    const index = tx.objectStore(OUTPUTS_STORE).index(JOB_ID_INDEX);
+    const outputs = await requestToPromise<GeneratedOutputRecord[]>(index.getAll(jobId));
+    return outputs.sort((a, b) => b.createdAt - a.createdAt)[0];
+  }
+
+  async saveThreeDPreparationReport(report: ThreeDPreparationReport): Promise<void> {
+    const db = await openCloneDb();
+    const tx = db.transaction([THREE_D_REPORTS_STORE, JOBS_STORE], "readwrite");
+    tx.objectStore(THREE_D_REPORTS_STORE).put(report);
+
+    const jobStore = tx.objectStore(JOBS_STORE);
+    const job = await requestToPromise<JobRecord | undefined>(jobStore.get(report.jobId));
+    if (job) {
+      jobStore.put({
+        ...job,
+        threeDPreparationReport: report,
+        updatedAt: Date.now()
+      });
+    }
+
+    await transactionDone(tx);
+  }
+
+  async getThreeDPreparationReport(jobId: string): Promise<ThreeDPreparationReport | undefined> {
+    const db = await openCloneDb();
+    const stored = await requestToPromise<ThreeDPreparationReport | undefined>(
+      db.transaction(THREE_D_REPORTS_STORE, "readonly").objectStore(THREE_D_REPORTS_STORE).get(jobId)
+    );
+    if (stored) {
+      return stored;
+    }
+
+    const job = await this.getJob(jobId);
+    return job?.threeDPreparationReport;
+  }
+
+  async updateThreeDPreparationReport(
+    jobId: string,
+    patch: Partial<Omit<ThreeDPreparationReport, "jobId">>
+  ): Promise<ThreeDPreparationReport | undefined> {
+    const current =
+      (await this.getThreeDPreparationReport(jobId)) ??
+      ({
+        jobId,
+        startedAt: Date.now(),
+        detected3dAssets: 0,
+        gltfFilesAnalyzed: 0,
+        gltfFilesRewritten: 0,
+        derivedAssetsCreated: 0,
+        derivedAssetsUploaded: 0,
+        decoderAssetsDetected: 0,
+        workerAssetsDetected: 0,
+        wasmAssetsDetected: 0,
+        textureAssetsDetected: 0,
+        unresolvedGltfUris: [],
+        unresolvedDecoderUrls: [],
+        unresolvedWorkerUrls: [],
+        warnings: [],
+        errors: []
+      } satisfies ThreeDPreparationReport);
+    const updated = mergeThreeDReport(current, patch);
+    await this.saveThreeDPreparationReport(updated);
+    return updated;
+  }
 }
 
 export class BlobStore implements BlobStoreLike {
@@ -374,6 +575,9 @@ export class BlobStore implements BlobStoreLike {
     contentType: string;
     originalUrl?: string;
     normalizedUrl?: string;
+    derivedFromAssetId?: string;
+    derivedKind?: BlobRecord["derivedKind"];
+    filename?: string;
   }): Promise<BlobRecord> {
     const existing = await this.getBlobRecordByHash(params.sha256);
     if (existing) {
@@ -389,6 +593,9 @@ export class BlobStore implements BlobStoreLike {
       contentType: params.contentType,
       originalUrl: params.originalUrl,
       normalizedUrl: params.normalizedUrl,
+      derivedFromAssetId: params.derivedFromAssetId,
+      derivedKind: params.derivedKind,
+      filename: params.filename,
       createdAt: now,
       updatedAt: now,
       blob: params.blob
@@ -466,7 +673,8 @@ export function computeJobStats(assets: AssetRecord[]): JobStats {
     skippedAssets: 0,
     totalBytes: 0,
     downloadedBytes: 0,
-    uploadedAssets: 0
+    uploadedAssets: 0,
+    totalUploadedBytes: 0
   };
 
   for (const asset of assets) {
@@ -478,7 +686,7 @@ export function computeJobStats(assets: AssetRecord[]): JobStats {
       stats.downloadingAssets += 1;
     }
 
-    if (asset.status === "downloaded") {
+    if (asset.status === "downloaded" || asset.status === "uploading" || asset.status === "uploaded" || asset.localBlobId) {
       stats.downloadedAssets += 1;
       stats.downloadedBytes += asset.size ?? 0;
     }
@@ -493,6 +701,7 @@ export function computeJobStats(assets: AssetRecord[]): JobStats {
 
     if (asset.status === "uploaded") {
       stats.uploadedAssets += 1;
+      stats.totalUploadedBytes += asset.size ?? 0;
     }
 
     stats.totalBytes += asset.size ?? 0;
@@ -542,6 +751,25 @@ async function openCloneDb(): Promise<IDBDatabase> {
       if (!blobStore.indexNames.contains(SHA256_INDEX)) {
         blobStore.createIndex(SHA256_INDEX, "sha256", { unique: true });
       }
+
+      if (!db.objectStoreNames.contains(HTML_SNAPSHOTS_STORE)) {
+        db.createObjectStore(HTML_SNAPSHOTS_STORE, { keyPath: "jobId" });
+      }
+
+      let outputStore: IDBObjectStore;
+      if (db.objectStoreNames.contains(OUTPUTS_STORE)) {
+        outputStore = tx.objectStore(OUTPUTS_STORE);
+      } else {
+        outputStore = db.createObjectStore(OUTPUTS_STORE, { keyPath: "id" });
+      }
+
+      if (!outputStore.indexNames.contains(JOB_ID_INDEX)) {
+        outputStore.createIndex(JOB_ID_INDEX, "jobId", { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains(THREE_D_REPORTS_STORE)) {
+        db.createObjectStore(THREE_D_REPORTS_STORE, { keyPath: "jobId" });
+      }
     };
 
     request.onerror = () => reject(request.error ?? new Error("Failed to open IndexedDB"));
@@ -567,6 +795,10 @@ function transactionDone(tx: IDBTransaction): Promise<void> {
 }
 
 async function deleteAssetsForJob(store: IDBObjectStore, jobId: string): Promise<void> {
+  await deleteRecordsForJob(store, jobId);
+}
+
+async function deleteRecordsForJob(store: IDBObjectStore, jobId: string): Promise<void> {
   const index = store.index(JOB_ID_INDEX);
   const keys = await requestToPromise<IDBValidKey[]>(index.getAllKeys(jobId));
 
@@ -581,15 +813,72 @@ function cloneJob(job: JobRecord): JobRecord {
     frameIds: [...job.frameIds],
     stats: { ...job.stats },
     errors: job.errors.map((error) => ({ ...error })),
-    output: job.output ? { ...job.output } : undefined
+    output: job.output
+      ? {
+          ...job.output,
+          rewriteReport: job.output.rewriteReport ? cloneRewriteReport(job.output.rewriteReport) : undefined,
+          threeDPreparationReport: job.output.threeDPreparationReport
+            ? cloneThreeDReport(job.output.threeDPreparationReport)
+            : undefined
+        }
+      : undefined,
+    rewriteReport: job.rewriteReport ? cloneRewriteReport(job.rewriteReport) : undefined,
+    threeDPreparationReport: job.threeDPreparationReport ? cloneThreeDReport(job.threeDPreparationReport) : undefined
   };
 }
 
 function cloneAsset(asset: AssetRecord): AssetRecord {
   return {
     ...asset,
-    source: [...asset.source]
+    source: [...asset.source],
+    threeDPreparationWarnings: asset.threeDPreparationWarnings ? [...asset.threeDPreparationWarnings] : undefined
   };
+}
+
+function cloneHtmlSnapshot(snapshot: HtmlSnapshotRecord): HtmlSnapshotRecord {
+  return { ...snapshot };
+}
+
+function cloneGeneratedOutput(output: GeneratedOutputRecord): GeneratedOutputRecord {
+  return {
+    ...output,
+    rewriteReport: cloneRewriteReport(output.rewriteReport)
+  };
+}
+
+function cloneRewriteReport<T extends { unresolvedUrls: string[]; warnings: string[] }>(report: T): T {
+  return {
+    ...report,
+    unresolvedUrls: [...report.unresolvedUrls],
+    warnings: [...report.warnings]
+  };
+}
+
+function cloneThreeDReport(report: ThreeDPreparationReport): ThreeDPreparationReport {
+  return {
+    ...report,
+    unresolvedGltfUris: [...report.unresolvedGltfUris],
+    unresolvedDecoderUrls: [...report.unresolvedDecoderUrls],
+    unresolvedWorkerUrls: [...report.unresolvedWorkerUrls],
+    warnings: [...report.warnings],
+    errors: [...report.errors]
+  };
+}
+
+function mergeThreeDReport(
+  current: ThreeDPreparationReport,
+  patch: Partial<Omit<ThreeDPreparationReport, "jobId">>
+): ThreeDPreparationReport {
+  return cloneThreeDReport({
+    ...current,
+    ...patch,
+    jobId: current.jobId,
+    unresolvedGltfUris: patch.unresolvedGltfUris ?? current.unresolvedGltfUris,
+    unresolvedDecoderUrls: patch.unresolvedDecoderUrls ?? current.unresolvedDecoderUrls,
+    unresolvedWorkerUrls: patch.unresolvedWorkerUrls ?? current.unresolvedWorkerUrls,
+    warnings: patch.warnings ?? current.warnings,
+    errors: patch.errors ?? current.errors
+  });
 }
 
 function stripBlob(record: StoredBlobRecord): BlobRecord {

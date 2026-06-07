@@ -15,7 +15,8 @@ const common = {
   resolve: {
     alias: {
       "@clone3d/shared": path.resolve(repoRoot, "packages/shared/src/index.ts"),
-      "@clone3d/storage": path.resolve(repoRoot, "packages/storage/src/index.ts")
+      "@clone3d/storage": path.resolve(repoRoot, "packages/storage/src/index.ts"),
+      "@clone3d/rewriter": path.resolve(repoRoot, "packages/rewriter/src/index.ts")
     }
   }
 };

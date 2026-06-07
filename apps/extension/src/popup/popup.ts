@@ -1,19 +1,31 @@
 import { EXTENSION_MESSAGE_TYPES } from "@clone3d/shared";
-import type { AssetRecord, JobRecord, JobStats, JobSummary } from "@clone3d/shared";
+import type { AssetRecord, JobRecord, JobSummary } from "@clone3d/shared";
 
 const statusEl = document.querySelector<HTMLElement>("#status");
 const startButton = document.querySelector<HTMLButtonElement>("#start-capture");
 const startDownloadsButton = document.querySelector<HTMLButtonElement>("#start-downloads");
 const resumeDownloadsButton = document.querySelector<HTMLButtonElement>("#resume-downloads");
 const cancelDownloadsButton = document.querySelector<HTMLButtonElement>("#cancel-downloads");
+const startUploadsButton = document.querySelector<HTMLButtonElement>("#start-uploads");
+const resumeUploadsButton = document.querySelector<HTMLButtonElement>("#resume-uploads");
+const cancelUploadsButton = document.querySelector<HTMLButtonElement>("#cancel-uploads");
+const prepare3dButton = document.querySelector<HTMLButtonElement>("#prepare-3d");
+const cancelPrepare3dButton = document.querySelector<HTMLButtonElement>("#cancel-prepare-3d");
+const generateAppHtmlButton = document.querySelector<HTMLButtonElement>("#generate-app-html");
 const assetCountEl = document.querySelector<HTMLElement>("#asset-count");
 const jobUrlEl = document.querySelector<HTMLElement>("#job-url");
 const downloadStatsEl = document.querySelector<HTMLElement>("#download-stats");
+const uploadStatsEl = document.querySelector<HTMLElement>("#upload-stats");
+const threeDStatsEl = document.querySelector<HTMLElement>("#three-d-stats");
+const rewriteStatsEl = document.querySelector<HTMLElement>("#rewrite-stats");
 const progressFillEl = document.querySelector<HTMLElement>("#progress-fill");
 const assetListEl = document.querySelector<HTMLUListElement>("#asset-list");
 
+type PollingMode = "download" | "upload" | "prepare3d" | "rewrite";
+
 let currentJobId: string | undefined;
 let pollingTimer: number | undefined;
+let pollingMode: PollingMode = "download";
 
 startButton?.addEventListener("click", () => {
   void startCapture();
@@ -29,6 +41,30 @@ resumeDownloadsButton?.addEventListener("click", () => {
 
 cancelDownloadsButton?.addEventListener("click", () => {
   void cancelDownloads();
+});
+
+startUploadsButton?.addEventListener("click", () => {
+  void startUploads(EXTENSION_MESSAGE_TYPES.startUploads);
+});
+
+resumeUploadsButton?.addEventListener("click", () => {
+  void startUploads(EXTENSION_MESSAGE_TYPES.resumeUploads);
+});
+
+cancelUploadsButton?.addEventListener("click", () => {
+  void cancelUploads();
+});
+
+prepare3dButton?.addEventListener("click", () => {
+  void prepare3dAssets();
+});
+
+cancelPrepare3dButton?.addEventListener("click", () => {
+  void cancelPrepare3d();
+});
+
+generateAppHtmlButton?.addEventListener("click", () => {
+  void generateAppHtml();
 });
 
 void loadLatestSummary();
@@ -80,11 +116,42 @@ async function startDownloads(type: string): Promise<void> {
     }
 
     renderSummary(response.summary);
-    startPolling();
+    startPolling("download");
   } catch (error) {
     setStatus(error instanceof Error ? error.message : "Falha ao iniciar downloads");
   } finally {
     setDownloadBusy(false);
+  }
+}
+
+async function startUploads(type: string): Promise<void> {
+  setUploadBusy(true);
+  setStatus("Enviando assets...");
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type,
+      payload: {
+        jobId: currentJobId
+      }
+    });
+
+    if (!response?.ok) {
+      setStatus(uploadErrorToLabel(response?.error));
+      renderSummary(response?.summary);
+      return;
+    }
+
+    renderSummary(response.summary);
+    if (response.summary?.job?.status === "uploading") {
+      startPolling("upload");
+    } else {
+      setStatus(statusToLabel(response.summary?.job?.status));
+    }
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : "Falha ao iniciar uploads");
+  } finally {
+    setUploadBusy(false);
   }
 }
 
@@ -107,6 +174,114 @@ async function cancelDownloads(): Promise<void> {
   setStatus(response?.ok ? "Cancelado" : "Falha ao cancelar");
 }
 
+async function cancelUploads(): Promise<void> {
+  if (!currentJobId) {
+    return;
+  }
+
+  setStatus("Cancelando uploads...");
+
+  const response = await chrome.runtime.sendMessage({
+    type: EXTENSION_MESSAGE_TYPES.cancelUploads,
+    payload: {
+      jobId: currentJobId
+    }
+  });
+
+  stopPolling();
+  renderSummary(response?.summary);
+  setStatus(response?.ok ? "Uploads cancelados" : "Falha ao cancelar uploads");
+}
+
+async function prepare3dAssets(): Promise<void> {
+  if (!currentJobId) {
+    return;
+  }
+
+  setPrepare3dBusy(true);
+  setStatus("Preparando assets 3D...");
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: EXTENSION_MESSAGE_TYPES.prepare3dAssets,
+      payload: {
+        jobId: currentJobId
+      }
+    });
+
+    if (!response?.ok) {
+      setStatus(response?.error || "Falha ao preparar 3D");
+      renderSummary(response?.summary);
+      return;
+    }
+
+    renderSummary(response.summary);
+    if (response.summary?.job?.status === "preparing-3d") {
+      startPolling("prepare3d");
+    } else {
+      setStatus(statusToLabel(response.summary?.job?.status));
+    }
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : "Falha ao preparar 3D");
+  } finally {
+    setPrepare3dBusy(false);
+  }
+}
+
+async function cancelPrepare3d(): Promise<void> {
+  if (!currentJobId) {
+    return;
+  }
+
+  setStatus("Cancelando preparacao 3D...");
+
+  const response = await chrome.runtime.sendMessage({
+    type: EXTENSION_MESSAGE_TYPES.cancelPrepare3d,
+    payload: {
+      jobId: currentJobId
+    }
+  });
+
+  stopPolling();
+  renderSummary(response?.summary);
+  setStatus(response?.ok ? "Preparacao 3D cancelada" : "Falha ao cancelar preparacao 3D");
+}
+
+async function generateAppHtml(): Promise<void> {
+  if (!currentJobId) {
+    return;
+  }
+
+  setRewriteBusy(true);
+  setStatus("Gerando app.html...");
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: EXTENSION_MESSAGE_TYPES.generateAppHtml,
+      payload: {
+        jobId: currentJobId
+      }
+    });
+
+    if (!response?.ok) {
+      setStatus(response?.error || "Falha ao gerar app.html");
+      renderSummary(response?.summary);
+      return;
+    }
+
+    renderSummary(response.summary);
+    if (response.summary?.job?.status === "rewriting") {
+      startPolling("rewrite");
+    } else {
+      setStatus(statusToLabel(response.summary?.job?.status));
+    }
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : "Falha ao gerar app.html");
+  } finally {
+    setRewriteBusy(false);
+  }
+}
+
 async function loadLatestSummary(): Promise<void> {
   setStatus("Pronto");
 
@@ -118,19 +293,26 @@ async function loadLatestSummary(): Promise<void> {
 
     renderSummary(response?.summary);
     if (response?.summary?.job?.status === "downloading") {
-      startPolling();
+      startPolling("download");
+    } else if (response?.summary?.job?.status === "uploading") {
+      startPolling("upload");
+    } else if (response?.summary?.job?.status === "preparing-3d") {
+      startPolling("prepare3d");
+    } else if (response?.summary?.job?.status === "rewriting") {
+      startPolling("rewrite");
     }
   } catch {
     renderSummary();
   }
 }
 
-function startPolling(): void {
+function startPolling(mode: PollingMode): void {
   stopPolling();
+  pollingMode = mode;
   pollingTimer = window.setInterval(() => {
-    void refreshDownloadProgress();
+    void refreshProgress();
   }, 1000);
-  void refreshDownloadProgress();
+  void refreshProgress();
 }
 
 function stopPolling(): void {
@@ -140,9 +322,16 @@ function stopPolling(): void {
   }
 }
 
-async function refreshDownloadProgress(): Promise<void> {
+async function refreshProgress(): Promise<void> {
   const response = await chrome.runtime.sendMessage({
-    type: EXTENSION_MESSAGE_TYPES.getDownloadProgress,
+    type:
+      pollingMode === "rewrite"
+        ? EXTENSION_MESSAGE_TYPES.getRewriteProgress
+        : pollingMode === "prepare3d"
+        ? EXTENSION_MESSAGE_TYPES.getPrepare3dProgress
+        : pollingMode === "upload"
+        ? EXTENSION_MESSAGE_TYPES.getUploadProgress
+        : EXTENSION_MESSAGE_TYPES.getDownloadProgress,
     payload: {
       jobId: currentJobId
     }
@@ -150,7 +339,7 @@ async function refreshDownloadProgress(): Promise<void> {
 
   renderSummary(response?.summary);
   const status = response?.summary?.job?.status;
-  if (isTerminalStatus(status)) {
+  if (isTerminalStatus(status, pollingMode)) {
     stopPolling();
     setStatus(statusToLabel(status));
   } else if (status) {
@@ -208,6 +397,32 @@ function setDownloadBusy(value: boolean): void {
   }
 }
 
+function setUploadBusy(value: boolean): void {
+  if (startUploadsButton) {
+    startUploadsButton.disabled = value;
+  }
+
+  if (resumeUploadsButton) {
+    resumeUploadsButton.disabled = value;
+  }
+}
+
+function setPrepare3dBusy(value: boolean): void {
+  if (prepare3dButton) {
+    prepare3dButton.disabled = value;
+  }
+
+  if (cancelPrepare3dButton) {
+    cancelPrepare3dButton.disabled = value;
+  }
+}
+
+function setRewriteBusy(value: boolean): void {
+  if (generateAppHtmlButton) {
+    generateAppHtmlButton.disabled = value;
+  }
+}
+
 function renderSummary(summary?: JobSummary): void {
   const assets = summary?.assets ?? [];
   const job = summary?.job;
@@ -223,6 +438,9 @@ function renderSummary(summary?: JobSummary): void {
   }
 
   renderDownloadStats(job);
+  renderUploadStats(job);
+  renderThreeDStats(job);
+  renderRewriteStats(job);
   updateActions(job);
 
   if (!assetListEl) {
@@ -246,7 +464,7 @@ function renderSummary(summary?: JobSummary): void {
 
 function renderDownloadStats(job: JobRecord | undefined): void {
   const stats = job?.stats;
-  const percent = stats ? progressPercent(stats) : 0;
+  const percent = job ? progressPercent(job) : 0;
 
   if (progressFillEl) {
     progressFillEl.style.width = `${percent}%`;
@@ -270,21 +488,129 @@ function renderDownloadStats(job: JobRecord | undefined): void {
   ].join(" | ");
 }
 
+function renderUploadStats(job: JobRecord | undefined): void {
+  const stats = job?.stats;
+  if (!uploadStatsEl) {
+    return;
+  }
+
+  if (!stats || stats.downloadedAssets <= 0) {
+    uploadStatsEl.textContent = "Sem uploads.";
+    return;
+  }
+
+  uploadStatsEl.textContent = [
+    `uploads: ${stats.uploadedAssets}/${stats.downloadedAssets}`,
+    `falhas: ${stats.failedAssets}`,
+    `bytes enviados: ${formatBytes(stats.totalUploadedBytes)}`,
+    `progresso: ${job ? progressPercent(job) : 0}%`
+  ].join(" | ");
+}
+
+function renderThreeDStats(job: JobRecord | undefined): void {
+  if (!threeDStatsEl) {
+    return;
+  }
+
+  const report = job?.threeDPreparationReport || job?.output?.threeDPreparationReport;
+  if (!report) {
+    const assets3d = job ? "Aguardando preparacao 3D." : "Sem preparacao 3D.";
+    threeDStatsEl.textContent = assets3d;
+    return;
+  }
+
+  threeDStatsEl.textContent = [
+    `3D: ${report.detected3dAssets}`,
+    `gltf: ${report.gltfFilesAnalyzed}/${report.gltfFilesRewritten}`,
+    `derivados: ${report.derivedAssetsUploaded}`,
+    `decoders: ${report.decoderAssetsDetected}`,
+    `workers: ${report.workerAssetsDetected}`,
+    `wasm: ${report.wasmAssetsDetected}`,
+    `pendentes: ${report.unresolvedGltfUris.length + report.unresolvedDecoderUrls.length + report.unresolvedWorkerUrls.length}`,
+    `avisos: ${report.warnings.length}`
+  ].join(" | ");
+}
+
+function renderRewriteStats(job: JobRecord | undefined): void {
+  if (!rewriteStatsEl) {
+    return;
+  }
+
+  const report = job?.rewriteReport || job?.output?.rewriteReport;
+  if (!report) {
+    rewriteStatsEl.textContent = "Sem app.html.";
+    return;
+  }
+
+  rewriteStatsEl.textContent = [
+    `app.html: ${report.outputFilename || job?.output?.fileName || "em andamento"}`,
+    `html: ${report.htmlRewrites}`,
+    `css: ${report.cssRewrites}`,
+    `js: ${report.jsDirectRewrites}`,
+    `json: ${report.jsonInlined}`,
+    `pendentes: ${report.unresolvedUrls.length}`
+  ].join(" | ");
+}
+
 function updateActions(job: JobRecord | undefined): void {
   const hasJob = Boolean(job);
   const status = job?.status;
 
   if (startDownloadsButton) {
-    startDownloadsButton.disabled = !hasJob || status === "downloading";
+    startDownloadsButton.disabled = !hasJob || status === "downloading" || status === "uploading" || status === "preparing-3d";
   }
 
   if (resumeDownloadsButton) {
     resumeDownloadsButton.hidden = !(status === "partially-downloaded" || status === "failed");
-    resumeDownloadsButton.disabled = status === "downloading";
+    resumeDownloadsButton.disabled = status === "downloading" || status === "uploading" || status === "preparing-3d";
   }
 
   if (cancelDownloadsButton) {
     cancelDownloadsButton.disabled = !hasJob || status !== "downloading";
+  }
+
+  if (startUploadsButton) {
+    startUploadsButton.disabled =
+      !hasJob ||
+      status === "downloading" ||
+      status === "uploading" ||
+      status === "preparing-3d" ||
+      (job?.stats.downloadedAssets ?? 0) <= 0;
+  }
+
+  if (resumeUploadsButton) {
+    resumeUploadsButton.hidden = !(status === "partially-uploaded" || status === "failed" || status === "cancelled");
+    resumeUploadsButton.disabled = status === "uploading" || status === "preparing-3d" || (job?.stats.downloadedAssets ?? 0) <= 0;
+  }
+
+  if (cancelUploadsButton) {
+    cancelUploadsButton.disabled = !hasJob || status !== "uploading";
+  }
+
+  if (prepare3dButton) {
+    const uploadedAssets = job?.stats.uploadedAssets ?? 0;
+    prepare3dButton.disabled =
+      !hasJob ||
+      uploadedAssets <= 0 ||
+      status === "downloading" ||
+      status === "uploading" ||
+      status === "preparing-3d" ||
+      status === "rewriting";
+  }
+
+  if (cancelPrepare3dButton) {
+    cancelPrepare3dButton.disabled = !hasJob || status !== "preparing-3d";
+  }
+
+  if (generateAppHtmlButton) {
+    const uploadedAssets = job?.stats.uploadedAssets ?? 0;
+    generateAppHtmlButton.disabled =
+      !hasJob ||
+      uploadedAssets <= 0 ||
+      status === "downloading" ||
+      status === "uploading" ||
+      status === "preparing-3d" ||
+      status === "rewriting";
   }
 }
 
@@ -308,7 +634,11 @@ function renderAsset(asset: AssetRecord): HTMLLIElement {
     asset.status,
     asset.size !== undefined ? formatBytes(asset.size) : undefined,
     asset.contentType,
-    asset.sha256 ? `sha256:${asset.sha256.slice(0, 12)}` : undefined
+    asset.assetRole ? `role:${asset.assetRole}` : undefined,
+    asset.threeDPrepared ? "3d:prepared" : undefined,
+    asset.sha256 ? `sha256:${asset.sha256.slice(0, 12)}` : undefined,
+    asset.publicUrl ? `public:${compactUrl(asset.publicUrl)}` : undefined,
+    asset.originalPublicUrl ? `original:${compactUrl(asset.originalPublicUrl)}` : undefined
   ]
     .filter(Boolean)
     .join(" | ");
@@ -319,7 +649,24 @@ function renderAsset(asset: AssetRecord): HTMLLIElement {
 
   item.append(name, url, meta, source);
 
-  const issue = asset.lastError || asset.skippedReason || asset.error;
+  if (asset.publicUrl) {
+    const copyButton = document.createElement("button");
+    copyButton.type = "button";
+    copyButton.className = "asset-copy";
+    copyButton.textContent = "Copiar publicUrl";
+    copyButton.addEventListener("click", () => {
+      void navigator.clipboard.writeText(asset.publicUrl ?? "");
+    });
+    item.appendChild(copyButton);
+  }
+
+  const issue =
+    asset.lastError ||
+    asset.skippedReason ||
+    asset.error ||
+    (asset.threeDPreparationWarnings && asset.threeDPreparationWarnings.length > 0
+      ? asset.threeDPreparationWarnings.join("; ")
+      : undefined);
   if (issue) {
     const error = document.createElement("span");
     error.className = "asset-error";
@@ -353,7 +700,30 @@ function compactUrl(value: string): string {
   }
 }
 
-function progressPercent(stats: JobStats): number {
+function progressPercent(job: JobRecord): number {
+  const stats = job.stats;
+  if (job.status === "rewriting") {
+    return 100;
+  }
+
+  if (job.status === "preparing-3d" || job.status === "prepared-3d" || job.status === "partially-prepared-3d") {
+    const report = job.threeDPreparationReport;
+    if (!report || report.detected3dAssets <= 0) {
+      return job.status === "preparing-3d" ? 20 : 100;
+    }
+
+    const preparedAssets = report.gltfFilesRewritten + report.derivedAssetsUploaded;
+    return Math.min(100, Math.max(20, Math.round((preparedAssets / report.detected3dAssets) * 100)));
+  }
+
+  if (job.status === "uploading" || job.status === "uploaded" || job.status === "partially-uploaded") {
+    if (stats.downloadedAssets <= 0) {
+      return 0;
+    }
+
+    return Math.round((stats.uploadedAssets / stats.downloadedAssets) * 100);
+  }
+
   if (stats.totalAssets <= 0) {
     return 0;
   }
@@ -373,7 +743,25 @@ function formatBytes(value: number): string {
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function isTerminalStatus(status: JobRecord["status"] | undefined): boolean {
+function isTerminalStatus(status: JobRecord["status"] | undefined, mode: PollingMode): boolean {
+  if (mode === "rewrite") {
+    return status === "rewritten" || status === "rewrite-failed" || status === "failed" || status === "cancelled";
+  }
+
+  if (mode === "prepare3d") {
+    return (
+      status === "prepared-3d" ||
+      status === "partially-prepared-3d" ||
+      status === "prepare-3d-failed" ||
+      status === "failed" ||
+      status === "cancelled"
+    );
+  }
+
+  if (mode === "upload") {
+    return status === "uploaded" || status === "partially-uploaded" || status === "failed" || status === "cancelled";
+  }
+
   return status === "downloaded" || status === "partially-downloaded" || status === "failed" || status === "cancelled";
 }
 
@@ -387,11 +775,40 @@ function statusToLabel(status: string | undefined): string {
       return "Download concluido";
     case "partially-downloaded":
       return "Download parcial";
+    case "uploading":
+      return "Enviando";
+    case "uploaded":
+      return "Upload concluido";
+    case "partially-uploaded":
+      return "Upload parcial";
+    case "preparing-3d":
+      return "Preparando 3D";
+    case "prepared-3d":
+      return "3D preparado";
+    case "partially-prepared-3d":
+      return "3D parcialmente preparado";
+    case "prepare-3d-failed":
+      return "Falha ao preparar 3D";
+    case "rewriting":
+      return "Gerando app.html";
+    case "rewritten":
+      return "app.html gerado";
+    case "rewrite-failed":
+      return "Falha ao gerar app.html";
     case "failed":
       return "Falhou";
     case "cancelled":
       return "Cancelado";
     default:
       return status ?? "Sem job";
+  }
+}
+
+function uploadErrorToLabel(error: string | undefined): string {
+  switch (error) {
+    case "catbox_endpoint_required":
+      return "Configure o endpoint Catbox nas opcoes";
+    default:
+      return error || "Falha ao iniciar uploads";
   }
 }

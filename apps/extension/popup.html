@@ -21,12 +21,21 @@
         <button id="start-downloads" type="button">Iniciar download dos assets</button>
         <button id="resume-downloads" type="button" hidden>Retomar downloads</button>
         <button id="cancel-downloads" type="button" class="secondary">Cancelar</button>
+        <button id="start-uploads" type="button">Iniciar uploads</button>
+        <button id="resume-uploads" type="button" hidden>Retomar uploads</button>
+        <button id="cancel-uploads" type="button" class="secondary">Cancelar uploads</button>
+        <button id="prepare-3d" type="button">Preparar 3D</button>
+        <button id="cancel-prepare-3d" type="button" class="secondary">Cancelar 3D</button>
+        <button id="generate-app-html" type="button">Gerar app.html</button>
       </div>
       <section class="summary" aria-live="polite">
         <span><strong id="asset-count">0</strong> assets</span>
         <span id="job-url">Nenhum job</span>
         <div class="progress-bar" aria-hidden="true"><span id="progress-fill"></span></div>
         <div id="download-stats" class="download-stats">Sem downloads.</div>
+        <div id="upload-stats" class="download-stats">Sem uploads.</div>
+        <div id="three-d-stats" class="download-stats">Sem preparação 3D.</div>
+        <div id="rewrite-stats" class="download-stats">Sem app.html.</div>
       </section>
       <ul id="asset-list" class="asset-list"></ul>
       <a id="options" href="options.html" target="_blank" rel="noreferrer">Abrir opcoes</a>

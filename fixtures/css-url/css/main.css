@@ -1,0 +1,6 @@
+@import "./theme.css";
+
+.panel {
+  min-height: 180px;
+  background: url("../img/texture.svg") center / cover no-repeat;
+}

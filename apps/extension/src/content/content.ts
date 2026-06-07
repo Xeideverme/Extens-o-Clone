@@ -3,6 +3,7 @@ import type {
   AssetSource,
   ContentCaptureRequest,
   ContentCaptureResult,
+  CurrentHtmlSnapshotResponse,
   ExtensionMessage,
   MainWorldEvent
 } from "@clone3d/shared";
@@ -13,6 +14,14 @@ import { scanPerformanceAssets } from "./performance-scanner";
 const mainWorldEvents: MainWorldEvent[] = [];
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
+  if (message.type === EXTENSION_MESSAGE_TYPES.getCurrentHtmlSnapshot) {
+    sendResponse({
+      ok: true,
+      snapshot: captureHtmlSnapshot()
+    });
+    return false;
+  }
+
   if (message.type !== EXTENSION_MESSAGE_TYPES.contentCaptureRequest) {
     return false;
   }
@@ -78,8 +87,30 @@ function capturePage(request: ContentCaptureRequest): ContentCaptureResult {
     frameUrl: location.href,
     assets,
     mainWorldEvents: [...mainWorldEvents],
+    htmlSnapshot: captureHtmlSnapshot(),
     capturedAt: Date.now()
   };
+}
+
+function captureHtmlSnapshot(): CurrentHtmlSnapshotResponse {
+  return {
+    html: document.documentElement.outerHTML,
+    doctype: serializeDoctype(document.doctype),
+    documentUrl: location.href,
+    baseUrl: document.baseURI || location.href,
+    title: document.title || undefined,
+    capturedAt: Date.now()
+  };
+}
+
+function serializeDoctype(doctype: DocumentType | null): string {
+  if (!doctype) {
+    return "<!doctype html>";
+  }
+
+  const publicId = doctype.publicId ? ` PUBLIC "${doctype.publicId}"` : "";
+  const systemId = doctype.systemId ? `${doctype.publicId ? "" : " SYSTEM"} "${doctype.systemId}"` : "";
+  return `<!doctype ${doctype.name}${publicId}${systemId}>`;
 }
 
 function mainWorldEventToAsset(event: MainWorldEvent) {
