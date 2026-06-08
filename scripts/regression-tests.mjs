@@ -13,7 +13,23 @@ const assetMap = source("packages/rewriter/src/asset-map.ts");
 const pipeline = source("apps/extension/src/background/pipeline-runner.ts");
 const rewriteRunner = source("apps/extension/src/background/rewrite-runner.ts");
 
+function ensureGlobalRegExp(regex) {
+  if (regex.global) {
+    return regex;
+  }
+
+  const flags = regex.flags.includes("g") ? regex.flags : `${regex.flags}g`;
+  return new RegExp(regex.source, flags);
+}
+
+function safeMatchAll(input, regex) {
+  return Array.from(input.matchAll(ensureGlobalRegExp(regex)));
+}
+
 assert.match(validator, /export function isTransientWorkerWithoutBlob/);
+assert.match(validator, /export function ensureGlobalRegExp/);
+assert.match(validator, /export function safeMatchAll/);
+assert.match(validator, /safeMatchAll\(value, pattern\)/);
 assert.match(validator, /asset\.assetRole === "worker"/);
 assert.match(validator, /asset\.status === "skipped"/);
 assert.match(validator, /asset\.source\?\.includes\("worker-hook"\)/);
@@ -54,5 +70,12 @@ assert.match(pipeline, /rewrittenJob\?\.status === "rewrite-failed"/);
 assert.match(rewriteRunner, /lastError:\s*message/);
 assert.match(rewriteRunner, /validation-not-run-because-rewrite-failed/);
 assert.match(rewriteRunner, /parseCriticalAssetsMissing/);
+
+assert.doesNotThrow(() => safeMatchAll("Authorization Bearer abc Authorization", /Authorization/i));
+assert.equal(safeMatchAll("Authorization Bearer abc Authorization", /Authorization/i).length, 2);
+assert.deepEqual(
+  safeMatchAll("a A a", /a/i).map((match) => match[0]),
+  ["a", "A", "a"]
+);
 
 console.log("Regression checks passed.");

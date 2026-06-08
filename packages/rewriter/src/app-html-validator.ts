@@ -229,10 +229,23 @@ function findMatches(value: string, patterns: RegExp[]): string[] {
 
 function findRegexMatches(value: string, pattern: RegExp): string[] {
   const matches: string[] = [];
-  for (const match of value.matchAll(pattern)) {
+  for (const match of safeMatchAll(value, pattern)) {
     matches.push(match[0].slice(0, 240));
   }
   return unique(matches);
+}
+
+export function ensureGlobalRegExp(regex: RegExp): RegExp {
+  if (regex.global) {
+    return regex;
+  }
+
+  const flags = regex.flags.includes("g") ? regex.flags : `${regex.flags}g`;
+  return new RegExp(regex.source, flags);
+}
+
+export function safeMatchAll(input: string, regex: RegExp): RegExpMatchArray[] {
+  return Array.from(input.matchAll(ensureGlobalRegExp(regex)));
 }
 
 function findSynthesizedCatboxUrls(html: string, assets: AssetRecord[]): string[] {
