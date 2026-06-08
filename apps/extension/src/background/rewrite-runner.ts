@@ -54,8 +54,15 @@ export async function runPreparedRewriteJob(jobId: string, deps: RewriteRunnerDe
 
     const htmlSnapshot = await getHtmlSnapshot(job.id, deps.jobStore, job.tabId);
     const textAssets = await loadTextAssets(assets, deps.blobStore);
+    const servingSettings = {
+      assetServingMode: deps.settings.assetServingMode,
+      corsProxyEnabled: deps.settings.corsProxyEnabled,
+      corsProxyEndpoint: deps.settings.corsProxyEndpoint,
+      moduleServingStrategy: deps.settings.moduleServingStrategy,
+      selfContainedMaxInlineAssetKb: deps.settings.selfContainedMaxInlineAssetKb
+    };
     if (deps.settings.apiReplayEnabled) {
-      await prepareApiReplaySnapshots(job.id, { jobStore: deps.jobStore });
+      await prepareApiReplaySnapshots(job.id, { jobStore: deps.jobStore, servingSettings });
     }
     const apiSnapshots = deps.settings.apiReplayEnabled ? await deps.jobStore.getApiSnapshotsByJob(job.id) : [];
     const apiReplayReport = deps.settings.apiReplayEnabled ? await deps.jobStore.getApiReplayReport(job.id) : undefined;
@@ -70,7 +77,9 @@ export async function runPreparedRewriteJob(jobId: string, deps: RewriteRunnerDe
       apiSnapshots,
       inlineThresholdBytes: deps.settings.inlineThresholdKb * 1024,
       runtimeResolverEnabled: deps.settings.runtimeResolverEnabled,
-      includeRewriteReportInHtml: deps.settings.includeRewriteReportInHtml
+      includeRewriteReportInHtml: deps.settings.includeRewriteReportInHtml,
+      servingSettings,
+      allowGenerateWithCriticalMissingAssets: deps.settings.allowGenerateWithCriticalMissingAssets
     });
     report = generated.report;
     const htmlBlob = new Blob([generated.html], { type: "text/html;charset=utf-8" });

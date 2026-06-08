@@ -43,13 +43,23 @@ export function rewriteHtml(input: RewriteHtmlInput): RewriteHtmlOutput {
     cssRewrites += cssOutput.rewrites;
     unresolvedUrls.push(...cssOutput.unresolvedUrls);
     warnings.push(...cssOutput.warnings);
-    return `<style${attrs}>${cssOutput.css}</style>`;
+    return `<style${attrs}>${escapeStyleText(cssOutput.css)}</style>`;
   });
 
   html = html.replace(/<link\b([^>]*?)>/gi, (match, attrs: string) => {
     const rel = getAttribute(attrs, "rel")?.toLowerCase() ?? "";
     const href = getAttribute(attrs, "href");
-    if (!href || !rel.split(/\s+/).includes("stylesheet")) {
+    if (!href) {
+      return match;
+    }
+
+    if (rel.split(/\s+/).includes("modulepreload") && resolveTextAsset(href, input.baseUrl, input.jsByUrl) !== undefined) {
+      warnings.push(`removed modulepreload for inlined module: ${href}`);
+      htmlRewrites += 1;
+      return "";
+    }
+
+    if (!rel.split(/\s+/).includes("stylesheet")) {
       return match;
     }
 
@@ -64,7 +74,7 @@ export function rewriteHtml(input: RewriteHtmlInput): RewriteHtmlOutput {
       unresolvedUrls.push(...cssOutput.unresolvedUrls);
       warnings.push(...cssOutput.warnings);
       htmlRewrites += 1;
-      return `<style data-clone3d-inlined-from="${escapeHtmlAttribute(href)}">${cssOutput.css}</style>`;
+      return `<style data-clone3d-inlined-from="${escapeHtmlAttribute(href)}">${escapeStyleText(cssOutput.css)}</style>`;
     }
 
     const publicUrl = resolvePublicUrl(href, input.baseUrl, input.manifest);
@@ -90,7 +100,7 @@ export function rewriteHtml(input: RewriteHtmlInput): RewriteHtmlOutput {
       unresolvedUrls.push(...jsOutput.unresolvedCandidates);
       warnings.push(...jsOutput.warnings);
       htmlRewrites += 1;
-      return `<script${removeAttribute(attrs, "src")} data-clone3d-inlined-from="${escapeHtmlAttribute(src)}">${jsOutput.js}</script>`;
+      return `<script${removeAttribute(attrs, "src")} data-clone3d-inlined-from="${escapeHtmlAttribute(src)}">\n// Clone3D inlined from: ${src.replace(/\r?\n/g, " ")}\n${escapeScriptText(jsOutput.js)}</script>`;
     }
 
     const publicUrl = resolvePublicUrl(src, input.baseUrl, input.manifest);
@@ -269,6 +279,17 @@ function absolutize(value: string, baseUrl: string): string | undefined {
 
 function escapeHtmlAttribute(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+}
+
+function escapeScriptText(value: string): string {
+  return value
+    .replace(/<\/script/gi, "<\\/script")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
+function escapeStyleText(value: string): string {
+  return value.replace(/<\/style/gi, "<\\/style");
 }
 
 function escapeAttributePreservingQuote(value: string, quote: string): string {

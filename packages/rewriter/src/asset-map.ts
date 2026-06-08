@@ -1,14 +1,22 @@
 import type { AssetManifest, AssetManifestEntry, AssetRecord, JobRecord } from "@clone3d/shared";
+import type { RuntimeAssetServingSettings } from "@clone3d/shared";
+import { getAssetPublicUrl, toRuntimeAssetUrl } from "./asset-serving";
 import type { BuildAssetManifestResult } from "./types";
 
-export function buildAssetManifest(job: JobRecord, assets: AssetRecord[]): BuildAssetManifestResult {
+export function buildAssetManifest(
+  job: JobRecord,
+  assets: AssetRecord[],
+  settings?: Partial<RuntimeAssetServingSettings>
+): BuildAssetManifestResult {
   const entries: AssetManifestEntry[] = assets
-    .filter((asset) => isPublicUrl(getAssetPublicUrl(asset)))
+    .filter((asset) => isPublicUrl(toRuntimeAssetUrl(asset, settings)))
     .map((asset) => ({
       assetId: asset.id,
       originalUrl: asset.originalUrl,
       normalizedUrl: asset.normalizedUrl,
-      publicUrl: getAssetPublicUrl(asset) ?? "",
+      originalPublicUrl: getAssetPublicUrl(asset),
+      publicUrl: toRuntimeAssetUrl(asset, settings) ?? "",
+      runtimeUrl: toRuntimeAssetUrl(asset, settings),
       contentType: asset.contentType,
       detectedExtension: asset.detectedExtension,
       size: asset.size,
@@ -67,6 +75,7 @@ export function resolvePublicUrl(input: string, baseUrl: string, manifest: Asset
   const candidates = new Set<string>();
   candidates.add(raw);
   addEncodedVariants(candidates, raw);
+  addNextImageCandidates(candidates, raw, baseUrl);
 
   try {
     const absolute = new URL(raw, baseUrl);
@@ -93,6 +102,33 @@ export function resolvePublicUrl(input: string, baseUrl: string, manifest: Asset
   return undefined;
 }
 
+export function isNextImageOptimizerUrl(url: string): boolean {
+  try {
+    return new URL(url, "https://clone3d.invalid").pathname.includes("/_next/image");
+  } catch {
+    return /(?:^|\/)_next\/image(?:\?|$)/i.test(url);
+  }
+}
+
+export function extractNextImageOriginalUrl(url: string, baseUrl: string): string | undefined {
+  if (!isNextImageOptimizerUrl(url)) {
+    return undefined;
+  }
+
+  try {
+    const parsed = new URL(url, baseUrl);
+    const original = parsed.searchParams.get("url");
+    if (!original) {
+      return undefined;
+    }
+
+    const decoded = decodeURIComponent(original);
+    return new URL(decoded, baseUrl).href;
+  } catch {
+    return undefined;
+  }
+}
+
 export function shouldIgnoreUrl(value: string): boolean {
   const trimmed = value.trim();
   return (
@@ -111,6 +147,8 @@ function createStrongKeys(entry: AssetManifestEntry, pageUrl: string): string[] 
   const keys = new Set<string>();
   addUrlKeys(keys, entry.originalUrl, pageUrl);
   addUrlKeys(keys, entry.normalizedUrl, pageUrl);
+  addUrlKeys(keys, entry.originalPublicUrl ?? "", pageUrl);
+  addUrlKeys(keys, entry.runtimeUrl ?? "", pageUrl);
   return [...keys];
 }
 
@@ -122,6 +160,7 @@ function addUrlKeys(keys: Set<string>, value: string, baseUrl: string): void {
   keys.add(value);
   keys.add(withoutHash(value));
   addEncodedVariants(keys, value);
+  addNextImageCandidates(keys, value, baseUrl);
 
   try {
     const url = new URL(value, baseUrl);
@@ -136,6 +175,27 @@ function addUrlKeys(keys: Set<string>, value: string, baseUrl: string): void {
     addEncodedVariants(keys, `${url.origin}${url.pathname}`);
   } catch {
     // Non-URL strings are still useful as raw manifest keys.
+  }
+}
+
+function addNextImageCandidates(keys: Set<string>, value: string, baseUrl: string): void {
+  const original = extractNextImageOriginalUrl(value, baseUrl);
+  if (!original) {
+    return;
+  }
+
+  keys.add(original);
+  keys.add(withoutHash(original));
+  addEncodedVariants(keys, original);
+  try {
+    const url = new URL(original);
+    keys.add(`${url.pathname}${url.search}`);
+    keys.add(url.pathname);
+    keys.add(`${url.origin}${url.pathname}`);
+    addEncodedVariants(keys, `${url.pathname}${url.search}`);
+    addEncodedVariants(keys, url.pathname);
+  } catch {
+    // Absolute URL was already added.
   }
 }
 
@@ -176,10 +236,6 @@ function isPublicUrl(value: string | undefined): boolean {
   } catch {
     return false;
   }
-}
-
-function getAssetPublicUrl(asset: AssetRecord): string | undefined {
-  return asset.preparedPublicUrl || asset.publicUrl;
 }
 
 function withoutHash(value: string): string {

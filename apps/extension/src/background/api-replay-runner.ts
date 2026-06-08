@@ -5,11 +5,12 @@ import {
   rewriteApiSnapshotBody
 } from "@clone3d/rewriter";
 import { buildAssetManifest } from "@clone3d/rewriter";
-import type { ApiReplayReport, ApiSnapshotRecord, JobSummary } from "@clone3d/shared";
+import type { ApiReplayReport, ApiSnapshotRecord, JobSummary, RuntimeAssetServingSettings } from "@clone3d/shared";
 import { buildJobSummary } from "./download-runner";
 
 export interface ApiReplayRunnerDeps {
   jobStore: JobStore;
+  servingSettings?: Partial<RuntimeAssetServingSettings>;
 }
 
 export async function prepareApiReplaySnapshots(jobId: string | undefined, deps: ApiReplayRunnerDeps): Promise<JobSummary> {
@@ -23,7 +24,7 @@ export async function prepareApiReplaySnapshots(jobId: string | undefined, deps:
 
   const assets = await deps.jobStore.getAssetsByJob(job.id);
   const snapshots = await deps.jobStore.getApiSnapshotsByJob(job.id);
-  const manifestResult = buildAssetManifest(job, assets);
+  const manifestResult = buildAssetManifest(job, assets, deps.servingSettings);
   const report = (await deps.jobStore.getApiReplayReport(job.id)) ?? createApiReplayReport(job.id);
   let rewrittenResponses = 0;
   const warnings = [...report.warnings, ...manifestResult.warnings];

@@ -8,7 +8,7 @@ import {
   rewriteWorkerJs
 } from "@clone3d/rewriter";
 import { DEFAULT_MAX_UPLOAD_ATTEMPTS, DEFAULT_UPLOAD_TIMEOUT_MS, getExtension } from "@clone3d/shared";
-import type { AssetRecord, JobRecord, JobSummary, ThreeDPreparationReport } from "@clone3d/shared";
+import type { AssetRecord, JobRecord, JobSummary, RuntimeAssetServingSettings, ThreeDPreparationReport } from "@clone3d/shared";
 import { buildJobSummary } from "./download-runner";
 import { uploadDerivedAssetBlob, type DerivedAssetUploadOptions } from "./derived-asset-uploader";
 
@@ -18,6 +18,7 @@ export interface Prepare3dRunnerOptions {
   maxAttempts: number;
   retryBaseDelayMs: number;
   force: boolean;
+  servingSettings?: Partial<RuntimeAssetServingSettings>;
 }
 
 export interface Prepare3dRunnerDeps {
@@ -31,7 +32,8 @@ const DEFAULT_OPTIONS: Prepare3dRunnerOptions = {
   timeoutMs: DEFAULT_UPLOAD_TIMEOUT_MS,
   maxAttempts: DEFAULT_MAX_UPLOAD_ATTEMPTS,
   retryBaseDelayMs: 750,
-  force: false
+  force: false,
+  servingSettings: undefined
 };
 
 const TEXT_SCRIPT_EXTENSIONS = new Set([".js", ".mjs"]);
@@ -71,7 +73,7 @@ export async function runPreparedThreeDJob(jobId: string, deps: Prepare3dRunnerD
   let assets = await deps.jobStore.getAssetsByJob(job.id);
   let report = await refreshReportCounts(job.id, deps.jobStore);
 
-  const manifestResult = buildAssetManifest(job, assets);
+  const manifestResult = buildAssetManifest(job, assets, options.servingSettings);
   if (manifestResult.warnings.length > 0) {
     report = await appendReport(job.id, deps.jobStore, { warnings: manifestResult.warnings });
   }
@@ -99,7 +101,7 @@ export async function runPreparedThreeDJob(jobId: string, deps: Prepare3dRunnerD
   }
 
   assets = await deps.jobStore.getAssetsByJob(job.id);
-  const nextManifest = buildAssetManifest({ ...job, updatedAt: Date.now() }, assets).manifest;
+  const nextManifest = buildAssetManifest({ ...job, updatedAt: Date.now() }, assets, options.servingSettings).manifest;
   for (const asset of assets.filter(isWorkerOrDecoderCandidate)) {
     if (await isCancelled(job.id, deps.jobStore)) {
       return buildJobSummary(deps.jobStore, job.id);
@@ -188,7 +190,7 @@ async function prepareGltfAsset(
   }
 
   const gltfText = await blob.text();
-  const manifestResult = buildAssetManifest(job, allAssets);
+  const manifestResult = buildAssetManifest(job, allAssets, options.servingSettings);
   const output = rewriteGltf({
     gltfAsset: asset,
     gltfText,
@@ -479,7 +481,8 @@ function normalizeOptions(options: Partial<Prepare3dRunnerOptions> | undefined):
     maxAttempts: Math.max(1, Math.floor(options?.maxAttempts ?? DEFAULT_OPTIONS.maxAttempts)),
     retryBaseDelayMs: Math.max(100, Math.floor(options?.retryBaseDelayMs ?? DEFAULT_OPTIONS.retryBaseDelayMs)),
     endpoint: options?.endpoint?.trim() ?? DEFAULT_OPTIONS.endpoint,
-    force: Boolean(options?.force ?? DEFAULT_OPTIONS.force)
+    force: Boolean(options?.force ?? DEFAULT_OPTIONS.force),
+    servingSettings: options?.servingSettings
   };
 }
 

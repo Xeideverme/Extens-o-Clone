@@ -9,6 +9,7 @@ import {
   DEFAULT_UPLOAD_TIMEOUT_MS
 } from "@clone3d/shared";
 import type { CaptureMode } from "@clone3d/shared";
+import type { AssetServingMode, ModuleServingStrategy } from "@clone3d/shared";
 
 export interface ExtensionSettings {
   catboxUploadEndpoint: string;
@@ -31,6 +32,12 @@ export interface ExtensionSettings {
   pipelineAutoPrepare3d: boolean;
   pipelineAutoGenerateHtml: boolean;
   pipelinePollIntervalMs: number;
+  assetServingMode: AssetServingMode;
+  corsProxyEnabled: boolean;
+  corsProxyEndpoint: string;
+  moduleServingStrategy: ModuleServingStrategy;
+  selfContainedMaxInlineAssetKb: number;
+  allowGenerateWithCriticalMissingAssets: boolean;
 }
 
 const DEFAULT_SETTINGS: ExtensionSettings = {
@@ -53,7 +60,13 @@ const DEFAULT_SETTINGS: ExtensionSettings = {
   pipelineContinueOnPartialFailure: true,
   pipelineAutoPrepare3d: true,
   pipelineAutoGenerateHtml: true,
-  pipelinePollIntervalMs: 1000
+  pipelinePollIntervalMs: 1000,
+  assetServingMode: "auto",
+  corsProxyEnabled: false,
+  corsProxyEndpoint: "",
+  moduleServingStrategy: "auto",
+  selfContainedMaxInlineAssetKb: 2048,
+  allowGenerateWithCriticalMissingAssets: false
 };
 
 export class SettingsStore {
@@ -97,6 +110,20 @@ export class SettingsStore {
         500,
         5000,
         DEFAULT_SETTINGS.pipelinePollIntervalMs
+      ),
+      assetServingMode: normalizeAssetServingMode(values.assetServingMode),
+      corsProxyEnabled: normalizeBoolean(values.corsProxyEnabled, DEFAULT_SETTINGS.corsProxyEnabled),
+      corsProxyEndpoint: normalizeOptionalEndpoint(values.corsProxyEndpoint),
+      moduleServingStrategy: normalizeModuleServingStrategy(values.moduleServingStrategy),
+      selfContainedMaxInlineAssetKb: normalizeClampedInteger(
+        values.selfContainedMaxInlineAssetKb,
+        64,
+        51200,
+        DEFAULT_SETTINGS.selfContainedMaxInlineAssetKb
+      ),
+      allowGenerateWithCriticalMissingAssets: normalizeBoolean(
+        values.allowGenerateWithCriticalMissingAssets,
+        DEFAULT_SETTINGS.allowGenerateWithCriticalMissingAssets
       )
     };
   }
@@ -121,6 +148,23 @@ export class SettingsStore {
         5000,
         DEFAULT_SETTINGS.pipelinePollIntervalMs
       );
+    }
+    if (settings.assetServingMode !== undefined) {
+      normalizedSettings.assetServingMode = normalizeAssetServingMode(settings.assetServingMode);
+    }
+    if (settings.moduleServingStrategy !== undefined) {
+      normalizedSettings.moduleServingStrategy = normalizeModuleServingStrategy(settings.moduleServingStrategy);
+    }
+    if (settings.selfContainedMaxInlineAssetKb !== undefined) {
+      normalizedSettings.selfContainedMaxInlineAssetKb = normalizeClampedInteger(
+        settings.selfContainedMaxInlineAssetKb,
+        64,
+        51200,
+        DEFAULT_SETTINGS.selfContainedMaxInlineAssetKb
+      );
+    }
+    if (settings.corsProxyEndpoint !== undefined) {
+      normalizedSettings.corsProxyEndpoint = normalizeOptionalEndpoint(settings.corsProxyEndpoint);
     }
 
     await chrome.storage.local.set(normalizedSettings);
@@ -169,6 +213,32 @@ function normalizeEndpoint(value: unknown, fallback: string): string {
   return endpoint || fallback;
 }
 
+function normalizeOptionalEndpoint(value: unknown): string {
+  const endpoint = String(value ?? "").trim();
+  if (!endpoint) {
+    return "";
+  }
+
+  try {
+    const url = new URL(endpoint);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href.replace(/\/+$/g, "") : "";
+  } catch {
+    return "";
+  }
+}
+
 function normalizeBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
+}
+
+function normalizeAssetServingMode(value: unknown): AssetServingMode {
+  return value === "auto" || value === "catbox-direct" || value === "catbox-cors-proxy" || value === "inline-blob"
+    ? value
+    : DEFAULT_SETTINGS.assetServingMode;
+}
+
+function normalizeModuleServingStrategy(value: unknown): ModuleServingStrategy {
+  return value === "auto" || value === "proxy" || value === "inline-source" || value === "inline-blob"
+    ? value
+    : DEFAULT_SETTINGS.moduleServingStrategy;
 }

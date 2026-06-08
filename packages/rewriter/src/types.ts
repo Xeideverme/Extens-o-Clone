@@ -4,6 +4,7 @@ import type {
   AssetRecord,
   HtmlSnapshotRecord,
   JobRecord,
+  RuntimeAssetServingSettings,
   RewriteReport
 } from "@clone3d/shared";
 
@@ -84,6 +85,8 @@ export interface GenerateAppHtmlInput {
   inlineThresholdBytes: number;
   runtimeResolverEnabled: boolean;
   includeRewriteReportInHtml: boolean;
+  servingSettings?: Partial<RuntimeAssetServingSettings>;
+  allowGenerateWithCriticalMissingAssets?: boolean;
 }
 
 export interface GenerateAppHtmlOutput {

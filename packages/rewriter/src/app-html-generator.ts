@@ -1,8 +1,15 @@
 import type { AssetRecord, RewriteReport } from "@clone3d/shared";
 import { DEFAULT_INLINE_THRESHOLD_BYTES, getExtension } from "@clone3d/shared";
 import { buildApiReplayMap } from "./api-replay-rewriter";
+import {
+  DEFAULT_RUNTIME_ASSET_SERVING_SETTINGS,
+  normalizeRuntimeAssetServingSettings,
+  requiresCorsSafeServing
+} from "./asset-serving";
 import { buildAssetManifest } from "./asset-map";
+import { findCriticalAssetsMissing, validateGeneratedAppHtml } from "./app-html-validator";
 import { rewriteHtml } from "./html-rewriter";
+import { rewriteJs } from "./js-rewriter";
 import { buildInlineJsonResponses } from "./json-inliner";
 import { createRewriteReport, appendReportComment, escapeJsonForHtml } from "./report";
 import { buildRuntimeResolverScript } from "./runtime-template";
@@ -10,7 +17,13 @@ import type { GenerateAppHtmlInput, GenerateAppHtmlOutput, TextAssetRecord } fro
 
 export function generateAppHtml(input: GenerateAppHtmlInput): GenerateAppHtmlOutput {
   const report = createRewriteReport(input.job.id);
-  const manifestResult = buildAssetManifest(input.job, input.assets);
+  const servingSettings = normalizeRuntimeAssetServingSettings(input.servingSettings);
+  const missingCriticalAssets = findCriticalAssetsMissing(input.assets);
+  if (missingCriticalAssets.length > 0 && !input.allowGenerateWithCriticalMissingAssets) {
+    throw new Error(`critical-assets-missing:${missingCriticalAssets.slice(0, 10).join(",")}`);
+  }
+
+  const manifestResult = buildAssetManifest(input.job, input.assets, servingSettings);
   const manifest = manifestResult.manifest;
   const textAssets = input.textAssets;
   const inlineThresholdBytes = input.inlineThresholdBytes || DEFAULT_INLINE_THRESHOLD_BYTES;
@@ -18,10 +31,18 @@ export function generateAppHtml(input: GenerateAppHtmlInput): GenerateAppHtmlOut
   const apiReplay = buildApiReplayMap(input.apiSnapshots ?? [], manifest);
   const cssByUrl = buildTextMap(textAssets.filter((textAsset) => isCssAsset(textAsset.asset)));
   const jsByUrl = buildTextMap(textAssets.filter((textAsset) => isJsAsset(textAsset.asset)));
+  const moduleSources = buildModuleSourceMap(textAssets, manifest, servingSettings);
   const manifestScript = `<script id="__CLONE3D_ASSET_MANIFEST__" type="application/json">${escapeJsonForHtml(JSON.stringify(manifest))}</script>`;
   const apiReplayScript = `<script id="__CLONE3D_API_REPLAY__" type="application/json">${escapeJsonForHtml(JSON.stringify(apiReplay.replayMap))}</script>`;
+  const moduleSourcesScript = `<script id="__CLONE3D_MODULE_SOURCES__" type="application/json">${escapeJsonForHtml(JSON.stringify(moduleSources))}</script>`;
   const runtimeScript = input.runtimeResolverEnabled
-    ? `<script>${buildRuntimeResolverScript(manifest, inlineJson.inlineResponses, apiReplay.replayMap)}</script>`
+    ? `<script>${buildRuntimeResolverScript(
+        manifest,
+        inlineJson.inlineResponses,
+        apiReplay.replayMap,
+        moduleSources,
+        servingSettings
+      )}</script>`
     : "";
 
   report.assetsInManifest = manifest.entries.length;
@@ -29,6 +50,7 @@ export function generateAppHtml(input: GenerateAppHtmlInput): GenerateAppHtmlOut
   report.apiReplayWarnings = apiReplay.warnings;
   report.apiReplaySkippedSensitive = input.job.apiReplayReport?.skippedSensitive ?? 0;
   report.apiReplaySkippedTooLarge = input.job.apiReplayReport?.skippedTooLarge ?? 0;
+  report.criticalAssetsMissing = missingCriticalAssets;
   report.warnings.push(...manifestResult.warnings, ...inlineJson.warnings, ...apiReplay.warnings);
   if (input.assets.some((asset) => isGltfAsset(asset) && !asset.threeDPrepared)) {
     report.warnings.push("This job contains GLTF files that may require 3D preparation before app.html generation.");
@@ -46,7 +68,7 @@ export function generateAppHtml(input: GenerateAppHtmlInput): GenerateAppHtmlOut
     apiReplayMap: apiReplay.replayMap,
     inlineThresholdBytes,
     runtimeScript,
-    manifestScript: `${manifestScript}\n${apiReplayScript}`
+    manifestScript: `${manifestScript}\n${apiReplayScript}\n${moduleSourcesScript}`
   });
 
   report.htmlRewrites = rewritten.htmlRewrites;
@@ -57,6 +79,28 @@ export function generateAppHtml(input: GenerateAppHtmlInput): GenerateAppHtmlOut
   report.warnings.push(...rewritten.warnings);
 
   const filename = buildOutputFilename(input.job.pageUrl);
+  const validationReport = validateGeneratedAppHtml({
+    html: rewritten.html,
+    job: input.job,
+    assets: input.assets,
+    rewriteReport: report,
+    apiReplayReport: input.job.apiReplayReport,
+    threeDReport: input.job.threeDPreparationReport
+  });
+  report.validationReport = validationReport;
+  report.catboxDirectCorsRisks = validationReport.catboxDirectCorsRisks;
+  report.nextImageUnresolved = validationReport.nextImageUnresolved;
+  report.moduleScriptsDirectToCatbox = validationReport.moduleScriptsDirectToCatbox;
+  report.dynamicImportsDirectToCatbox = validationReport.dynamicImportsDirectToCatbox;
+  report.inlineScriptSyntaxWarnings = validationReport.inlineScriptSyntaxWarnings;
+  report.warnings.push(...validationReport.warnings);
+  const blockingLeak = validationReport.possibleSecretLeaks.some((value) =>
+    /uploadAuthToken|workerBearerToken|Authorization|\bBearer\b|Set-Cookie|\bCookie\b|userhash|UPLOAD_BEARER_TOKEN/i.test(value)
+  );
+  if (blockingLeak || rewritten.html.includes("chrome-extension://")) {
+    throw new Error(`app-html-security-validation-failed:${validationReport.errors.slice(0, 5).join(";")}`);
+  }
+
   const reportWithInitialSize = finalizeReport(report, filename, byteLength(rewritten.html));
   const html = input.includeRewriteReportInHtml
     ? appendReportComment(rewritten.html, finalizeReport(report, filename, byteLength(appendReportComment(rewritten.html, reportWithInitialSize))))
@@ -68,6 +112,46 @@ export function generateAppHtml(input: GenerateAppHtmlInput): GenerateAppHtmlOut
     report: finalReport,
     filename
   };
+}
+
+function buildModuleSourceMap(
+  textAssets: TextAssetRecord[],
+  manifest: ReturnType<typeof buildAssetManifest>["manifest"],
+  servingSettings = DEFAULT_RUNTIME_ASSET_SERVING_SETTINGS
+): Record<string, string> {
+  const shouldInlineModules =
+    servingSettings.assetServingMode === "inline-blob" ||
+    servingSettings.moduleServingStrategy === "inline-blob" ||
+    servingSettings.moduleServingStrategy === "inline-source" ||
+    (servingSettings.assetServingMode === "auto" && !servingSettings.corsProxyEnabled);
+  if (!shouldInlineModules) {
+    return {};
+  }
+
+  const maxBytes = servingSettings.selfContainedMaxInlineAssetKb * 1024;
+  const sources: Record<string, string> = {};
+  for (const textAsset of textAssets) {
+    if (!isJsAsset(textAsset.asset) || !requiresCorsSafeServing(textAsset.asset) || byteLength(textAsset.text) > maxBytes) {
+      continue;
+    }
+
+    const rewritten = rewriteJs({
+      js: textAsset.text,
+      scriptUrlOrBaseUrl: textAsset.asset.normalizedUrl,
+      manifest
+    }).js;
+
+    for (const key of textKeys(textAsset.asset)) {
+      sources[key] = rewritten;
+    }
+
+    const runtimeUrl = manifest.map[textAsset.asset.originalUrl] || manifest.map[textAsset.asset.normalizedUrl];
+    if (runtimeUrl) {
+      sources[runtimeUrl] = rewritten;
+    }
+  }
+
+  return sources;
 }
 
 function buildTextMap(textAssets: TextAssetRecord[]): Map<string, string> {

@@ -391,6 +391,8 @@ export interface AssetManifestEntry {
   originalUrl: string;
   normalizedUrl: string;
   publicUrl: string;
+  originalPublicUrl?: string;
+  runtimeUrl?: string;
   contentType?: string;
   detectedExtension?: string;
   size?: number;
@@ -421,8 +423,50 @@ export interface RewriteReport {
   apiReplayWarnings?: string[];
   apiReplaySkippedSensitive?: number;
   apiReplaySkippedTooLarge?: number;
+  validationReport?: AppHtmlValidationReport;
+  catboxDirectCorsRisks?: string[];
+  nextImageUnresolved?: string[];
+  moduleScriptsDirectToCatbox?: string[];
+  dynamicImportsDirectToCatbox?: string[];
+  criticalAssetsMissing?: string[];
+  inlineScriptSyntaxWarnings?: string[];
   outputFilename?: string;
   outputSize?: number;
+}
+
+export type AssetServingMode = "auto" | "catbox-direct" | "catbox-cors-proxy" | "inline-blob";
+
+export type ModuleServingStrategy = "auto" | "proxy" | "inline-source" | "inline-blob";
+
+export interface RuntimeAssetServingSettings {
+  assetServingMode: AssetServingMode;
+  corsProxyEnabled: boolean;
+  corsProxyEndpoint: string;
+  moduleServingStrategy: ModuleServingStrategy;
+  selfContainedMaxInlineAssetKb: number;
+}
+
+export interface AppHtmlValidationReport {
+  jobId: string;
+  createdAt: number;
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  hasAssetManifest: boolean;
+  hasRuntimeResolver: boolean;
+  hasApiReplayMap: boolean;
+  hasRewriteReport: boolean;
+  unresolvedRelativeFetchCandidates: string[];
+  unresolvedLocalSrcCandidates: string[];
+  possibleSecretLeaks: string[];
+  assetMapEntries: number;
+  apiReplayEntries: number;
+  catboxDirectCorsRisks: string[];
+  nextImageUnresolved: string[];
+  moduleScriptsDirectToCatbox: string[];
+  dynamicImportsDirectToCatbox: string[];
+  criticalAssetsMissing: string[];
+  inlineScriptSyntaxWarnings: string[];
 }
 
 export interface GeneratedOutputRecord {

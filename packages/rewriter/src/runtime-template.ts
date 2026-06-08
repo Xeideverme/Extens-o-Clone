@@ -1,14 +1,20 @@
 import type { AssetManifest } from "@clone3d/shared";
+import type { RuntimeAssetServingSettings } from "@clone3d/shared";
+import { normalizeRuntimeAssetServingSettings } from "./asset-serving";
 import type { InlineResponse } from "./types";
 
 export function buildRuntimeResolverScript(
   manifest: AssetManifest,
   inlineResponses: Record<string, InlineResponse> = {},
-  apiReplayMap: Record<string, InlineResponse> = {}
+  apiReplayMap: Record<string, InlineResponse> = {},
+  moduleSources: Record<string, string> = {},
+  servingSettings?: Partial<RuntimeAssetServingSettings>
 ): string {
   const assetMapJson = JSON.stringify(manifest.map);
   const inlineResponsesJson = JSON.stringify(inlineResponses);
   const apiReplayMapJson = JSON.stringify(apiReplayMap);
+  const moduleSourcesJson = JSON.stringify(moduleSources);
+  const servingSettingsJson = JSON.stringify(normalizeRuntimeAssetServingSettings(servingSettings));
 
   return `(function () {
   try {
@@ -18,9 +24,13 @@ export function buildRuntimeResolverScript(
     const ASSET_MAP = ${assetMapJson};
     const INLINE_RESPONSES = ${inlineResponsesJson};
     const API_REPLAY = ${apiReplayMapJson};
+    const MODULE_SOURCES = ${moduleSourcesJson};
+    const SERVING_SETTINGS = ${servingSettingsJson};
+    const MODULE_BLOB_URLS = Object.create(null);
     window.__CLONE3D_ASSET_MAP__ = ASSET_MAP;
     window.__CLONE3D_INLINE_RESPONSES__ = INLINE_RESPONSES;
     window.__CLONE3D_API_REPLAY__ = API_REPLAY;
+    window.__CLONE3D_MODULE_SOURCES__ = MODULE_SOURCES;
 
     function normalizeUrl(input, base) {
       try {
@@ -34,6 +44,8 @@ export function buildRuntimeResolverScript(
       try {
         const raw = String(input);
         if (!raw || /^(data|blob|javascript|about|mailto|tel):/i.test(raw)) return raw;
+        const nextImage = resolveNextImageUrl(raw, base);
+        if (nextImage && nextImage !== raw) return nextImage;
         const abs = normalizeUrl(raw, base);
         const noHash = abs.split("#")[0];
         let pathname = "";
@@ -44,9 +56,84 @@ export function buildRuntimeResolverScript(
           pathnameNoSearch = parsed.pathname;
         } catch {}
 
-        return ASSET_MAP[raw] || ASSET_MAP[abs] || ASSET_MAP[noHash] || ASSET_MAP[pathname] || ASSET_MAP[pathnameNoSearch] || raw;
+        return toProxyIfNeeded(ASSET_MAP[raw] || ASSET_MAP[abs] || ASSET_MAP[noHash] || ASSET_MAP[pathname] || ASSET_MAP[pathnameNoSearch] || raw);
       } catch {
         return input;
+      }
+    }
+
+    function resolveNextImageUrl(input, base) {
+      try {
+        const raw = String(input);
+        const parsed = new URL(raw, base || location.href);
+        if (!parsed.pathname.includes("/_next/image")) return undefined;
+        const original = parsed.searchParams.get("url");
+        if (!original) return ASSET_MAP[raw] || ASSET_MAP[parsed.href];
+        const decoded = decodeURIComponent(original);
+        const originalAbs = normalizeUrl(decoded, base || location.href);
+        const originalUrl = new URL(originalAbs);
+        return (
+          ASSET_MAP[raw] ||
+          ASSET_MAP[parsed.href] ||
+          ASSET_MAP[originalAbs] ||
+          ASSET_MAP[originalUrl.pathname + originalUrl.search] ||
+          ASSET_MAP[originalUrl.pathname]
+        );
+      } catch {
+        return undefined;
+      }
+    }
+
+    function catboxFilename(value) {
+      try {
+        const url = new URL(String(value));
+        if (url.hostname !== "files.catbox.moe") return "";
+        const filename = url.pathname.split("/").filter(Boolean).pop() || "";
+        return /^[a-zA-Z0-9_-]+\\.[a-zA-Z0-9]+$/.test(filename) ? filename : "";
+      } catch {
+        return "";
+      }
+    }
+
+    function toProxyIfNeeded(value) {
+      try {
+        if (!SERVING_SETTINGS.corsProxyEnabled || !SERVING_SETTINGS.corsProxyEndpoint) return value;
+        const filename = catboxFilename(value);
+        if (!filename) return value;
+        if (SERVING_SETTINGS.assetServingMode === "catbox-direct") return value;
+        return SERVING_SETTINGS.corsProxyEndpoint.replace(/\\/+$/g, "") + "/catbox/" + encodeURIComponent(filename);
+      } catch {
+        return value;
+      }
+    }
+
+    function moduleSourceFor(specifier, base) {
+      const raw = String(specifier);
+      const abs = normalizeUrl(raw, base || location.href);
+      const resolved = resolveUrl(raw, base || location.href);
+      const candidates = [raw, abs, abs.split("#")[0], resolved, String(resolved).split("#")[0]];
+      for (const key of candidates) {
+        if (MODULE_SOURCES[key]) return { key, source: MODULE_SOURCES[key] };
+      }
+      return undefined;
+    }
+
+    function moduleBlobUrl(specifier, base) {
+      const found = moduleSourceFor(specifier, base);
+      if (!found) return undefined;
+      if (!MODULE_BLOB_URLS[found.key]) {
+        MODULE_BLOB_URLS[found.key] = URL.createObjectURL(new Blob([found.source], { type: "text/javascript" }));
+      }
+      return MODULE_BLOB_URLS[found.key];
+    }
+
+    function resolveModuleUrl(specifier, base) {
+      try {
+        const blobUrl = moduleBlobUrl(specifier, base);
+        if (blobUrl) return blobUrl;
+        return resolveUrl(specifier, base || location.href);
+      } catch {
+        return specifier;
       }
     }
 
@@ -94,6 +181,8 @@ export function buildRuntimeResolverScript(
     }
 
     window.__clone3dResolveUrl = resolveUrl;
+    window.__clone3dResolveNextImageUrl = resolveNextImageUrl;
+    window.__clone3dResolveModuleUrl = resolveModuleUrl;
 
     try {
       const originalFetch = window.fetch;

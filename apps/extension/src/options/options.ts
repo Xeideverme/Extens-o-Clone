@@ -1,4 +1,5 @@
 import { DEFAULT_UPLOAD_CONCURRENCY } from "@clone3d/shared";
+import type { AssetServingMode, ModuleServingStrategy } from "@clone3d/shared";
 import { SettingsStore } from "../shared/settings-store";
 
 const form = document.querySelector<HTMLFormElement>("#settings-form");
@@ -21,6 +22,12 @@ const pipelineContinuePartialInput = document.querySelector<HTMLInputElement>("#
 const pipelineAutoPrepare3dInput = document.querySelector<HTMLInputElement>("#pipeline-auto-prepare-3d");
 const pipelineAutoGenerateHtmlInput = document.querySelector<HTMLInputElement>("#pipeline-auto-generate-html");
 const pipelinePollIntervalInput = document.querySelector<HTMLInputElement>("#pipeline-poll-interval");
+const assetServingModeInput = document.querySelector<HTMLSelectElement>("#asset-serving-mode");
+const corsProxyEnabledInput = document.querySelector<HTMLInputElement>("#cors-proxy-enabled");
+const corsProxyEndpointInput = document.querySelector<HTMLInputElement>("#cors-proxy-endpoint");
+const moduleServingStrategyInput = document.querySelector<HTMLSelectElement>("#module-serving-strategy");
+const selfContainedMaxInlineInput = document.querySelector<HTMLInputElement>("#self-contained-max-inline");
+const allowCriticalMissingInput = document.querySelector<HTMLInputElement>("#allow-critical-missing");
 const saveStatus = document.querySelector<HTMLParagraphElement>("#save-status");
 const settingsStore = new SettingsStore();
 
@@ -109,6 +116,30 @@ async function loadSettings(): Promise<void> {
   if (pipelinePollIntervalInput) {
     pipelinePollIntervalInput.value = String(settings.pipelinePollIntervalMs);
   }
+
+  if (assetServingModeInput) {
+    assetServingModeInput.value = settings.assetServingMode;
+  }
+
+  if (corsProxyEnabledInput) {
+    corsProxyEnabledInput.checked = settings.corsProxyEnabled;
+  }
+
+  if (corsProxyEndpointInput) {
+    corsProxyEndpointInput.value = settings.corsProxyEndpoint;
+  }
+
+  if (moduleServingStrategyInput) {
+    moduleServingStrategyInput.value = settings.moduleServingStrategy;
+  }
+
+  if (selfContainedMaxInlineInput) {
+    selfContainedMaxInlineInput.value = String(settings.selfContainedMaxInlineAssetKb);
+  }
+
+  if (allowCriticalMissingInput) {
+    allowCriticalMissingInput.checked = settings.allowGenerateWithCriticalMissingAssets;
+  }
 }
 
 async function saveSettings(): Promise<void> {
@@ -131,7 +162,13 @@ async function saveSettings(): Promise<void> {
     pipelineContinueOnPartialFailure: Boolean(pipelineContinuePartialInput?.checked),
     pipelineAutoPrepare3d: Boolean(pipelineAutoPrepare3dInput?.checked),
     pipelineAutoGenerateHtml: Boolean(pipelineAutoGenerateHtmlInput?.checked),
-    pipelinePollIntervalMs: Number(pipelinePollIntervalInput?.value || 1000)
+    pipelinePollIntervalMs: Number(pipelinePollIntervalInput?.value || 1000),
+    assetServingMode: assetServingModeInput?.value as AssetServingMode,
+    corsProxyEnabled: Boolean(corsProxyEnabledInput?.checked),
+    corsProxyEndpoint: corsProxyEndpointInput?.value.trim() ?? "",
+    moduleServingStrategy: moduleServingStrategyInput?.value as ModuleServingStrategy,
+    selfContainedMaxInlineAssetKb: Number(selfContainedMaxInlineInput?.value || 2048),
+    allowGenerateWithCriticalMissingAssets: Boolean(allowCriticalMissingInput?.checked)
   });
 
   if (saveStatus) {

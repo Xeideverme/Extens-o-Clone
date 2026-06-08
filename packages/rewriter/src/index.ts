@@ -1,5 +1,7 @@
 export * from "./app-html-generator";
+export * from "./app-html-validator";
 export * from "./api-replay-rewriter";
+export * from "./asset-serving";
 export * from "./asset-map";
 export * from "./css-rewriter";
 export * from "./detect-3d-assets";

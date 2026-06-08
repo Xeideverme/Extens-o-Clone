@@ -24,6 +24,7 @@ const threeDStatsEl = document.querySelector<HTMLElement>("#three-d-stats");
 const apiReplayStatsEl = document.querySelector<HTMLElement>("#api-replay-stats");
 const pipelineStatsEl = document.querySelector<HTMLElement>("#pipeline-stats");
 const rewriteStatsEl = document.querySelector<HTMLElement>("#rewrite-stats");
+const corsDiagnosticsEl = document.querySelector<HTMLElement>("#cors-diagnostics");
 const progressFillEl = document.querySelector<HTMLElement>("#progress-fill");
 const assetListEl = document.querySelector<HTMLUListElement>("#asset-list");
 const settingsStore = new SettingsStore();
@@ -35,6 +36,7 @@ let currentPipelineRunId: string | undefined;
 let pollingTimer: number | undefined;
 let pollingMode: PollingMode = "download";
 let pollIntervalMs = 1000;
+let currentSettings: Awaited<ReturnType<SettingsStore["get"]>> | undefined;
 
 startButton?.addEventListener("click", () => {
   void startCapture();
@@ -94,6 +96,7 @@ void loadLatestSummary();
 async function loadPopupSettings(): Promise<void> {
   try {
     const settings = await settingsStore.get();
+    currentSettings = settings;
     pollIntervalMs = settings.pipelinePollIntervalMs;
   } catch {
     pollIntervalMs = 1000;
@@ -541,10 +544,11 @@ function renderSummary(summary?: JobSummary): void {
 
   renderDownloadStats(job);
   renderUploadStats(job);
-  renderThreeDStats(job);
+  renderThreeDStats(job, assets);
   renderApiReplayStats(summary);
   renderPipelineStats(summary);
   renderRewriteStats(job);
+  renderCorsDiagnostics(job);
   updateActions(job, assets, summary?.pipelineRun);
 
   if (!assetListEl) {
@@ -611,15 +615,18 @@ function renderUploadStats(job: JobRecord | undefined): void {
   ].join(" | ");
 }
 
-function renderThreeDStats(job: JobRecord | undefined): void {
+function renderThreeDStats(job: JobRecord | undefined, assets: AssetRecord[]): void {
   if (!threeDStatsEl) {
     return;
   }
 
   const report = job?.threeDPreparationReport || job?.output?.threeDPreparationReport;
   if (!report) {
-    const assets3d = job ? "Aguardando preparacao 3D." : "Sem preparacao 3D.";
-    threeDStatsEl.textContent = assets3d;
+    threeDStatsEl.textContent = job && !hasLikelyThreeDAssets(job, assets)
+      ? "Nenhum asset 3D detectado. Preparacao 3D sera pulada."
+      : job
+        ? "Aguardando preparacao 3D."
+        : "Sem preparacao 3D.";
     return;
   }
 
@@ -687,18 +694,49 @@ function renderRewriteStats(job: JobRecord | undefined): void {
 
   const report = job?.rewriteReport || job?.output?.rewriteReport;
   if (!report) {
-    rewriteStatsEl.textContent = "Sem app.html.";
+    rewriteStatsEl.textContent = currentSettings?.corsProxyEnabled
+      ? `Sem app.html. CORS proxy: ${currentSettings.corsProxyEndpoint || "sem endpoint"}`
+      : "Sem app.html. Catbox direto pode falhar para modules/WASM/GLTF sem CORS proxy.";
     return;
   }
 
+  const validation = report.validationReport;
   rewriteStatsEl.textContent = [
     `app.html: ${report.outputFilename || job?.output?.fileName || "em andamento"}`,
     `html: ${report.htmlRewrites}`,
     `css: ${report.cssRewrites}`,
     `js: ${report.jsDirectRewrites}`,
     `json: ${report.jsonInlined}`,
-    `pendentes: ${report.unresolvedUrls.length}`
+    `pendentes: ${report.unresolvedUrls.length}`,
+    validation ? `validator: ${validation.ok ? "ok" : "erro"}` : undefined,
+    validation?.catboxDirectCorsRisks.length ? `catbox CORS: ${validation.catboxDirectCorsRisks.length}` : undefined,
+    validation?.nextImageUnresolved.length ? `next image: ${validation.nextImageUnresolved.length}` : undefined,
+    validation?.criticalAssetsMissing.length ? `criticos faltando: ${validation.criticalAssetsMissing.length}` : undefined,
+    currentSettings?.corsProxyEnabled ? "proxy: sim" : "proxy: nao"
   ].join(" | ");
+}
+
+function renderCorsDiagnostics(job: JobRecord | undefined): void {
+  if (!corsDiagnosticsEl) {
+    return;
+  }
+
+  const report = job?.rewriteReport || job?.output?.rewriteReport;
+  const validation = report?.validationReport;
+  corsDiagnosticsEl.textContent = [
+    "CORS/Catbox/Next:",
+    `proxy: ${currentSettings?.corsProxyEnabled ? "sim" : "nao"}`,
+    currentSettings?.corsProxyEndpoint ? `endpoint: ${compactUrl(currentSettings.corsProxyEndpoint)}` : undefined,
+    currentSettings?.assetServingMode ? `serving: ${currentSettings.assetServingMode}` : undefined,
+    currentSettings?.moduleServingStrategy ? `modules: ${currentSettings.moduleServingStrategy}` : undefined,
+    validation ? `validator: ${validation.ok ? "ok" : "erro"}` : "validator: pendente",
+    validation?.catboxDirectCorsRisks.length ? `Catbox direto: ${validation.catboxDirectCorsRisks.length}` : undefined,
+    validation?.dynamicImportsDirectToCatbox.length ? `dynamic imports: ${validation.dynamicImportsDirectToCatbox.length}` : undefined,
+    validation?.nextImageUnresolved.length ? `Next image pendente: ${validation.nextImageUnresolved.length}` : undefined,
+    validation?.criticalAssetsMissing.length ? `criticos faltando: ${validation.criticalAssetsMissing.length}` : undefined
+  ]
+    .filter(Boolean)
+    .join(" | ");
 }
 
 function updateActions(job: JobRecord | undefined, assets: AssetRecord[], summaryPipelineRun: JobSummary["pipelineRun"]): void {
@@ -860,16 +898,17 @@ function hasLikelyThreeDAssets(job: JobRecord | undefined, assets: AssetRecord[]
 
     if (
       asset.assetRole &&
-      !["html", "css", "script", "json", "image", "audio", "video", "unknown"].includes(asset.assetRole)
+      ["gltf", "glb", "gltf-buffer", "ktx2-texture", "draco-compressed", "draco-decoder", "basis-transcoder", "meshopt-decoder", "wasm", "worker", "model-viewer"].includes(asset.assetRole)
     ) {
       return true;
     }
 
     const value = `${asset.normalizedUrl} ${asset.originalUrl}`.toLowerCase();
+    const isDecoderOrModelPath = /(?:gltf|glb|model|scene|three|babylon|draco|basis|meshopt|ktx2|decoder|transcoder)/i.test(value);
     return (
-      /\.(gltf|glb|bin|drc|ktx2|basis|wasm|hdr|exr)(?:[?#\s]|$)/i.test(value) ||
-      /(?:draco|basis_transcoder|meshopt|ktx2loader|dracoloader|\.worker\.(?:js|mjs))/i.test(value) ||
-      asset.source.includes("worker-hook")
+      /\.(gltf|glb|drc|ktx2|basis|hdr|exr)(?:[?#\s]|$)/i.test(value) ||
+      /\.(bin|wasm)(?:[?#\s]|$)/i.test(value) && isDecoderOrModelPath ||
+      /(?:draco|basis_transcoder|meshopt|ktx2loader|dracoloader)/i.test(value)
     );
   });
 }

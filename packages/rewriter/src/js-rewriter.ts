@@ -8,7 +8,7 @@ export function rewriteJs(input: RewriteJsInput): RewriteJsOutput {
   const warnings: string[] = [];
   let directRewrites = 0;
 
-  const js = input.js.replace(/(["'`])((?:\\.|(?!\1)[\s\S])*?)\1/g, (match, quote: string, rawValue: string) => {
+  let js = input.js.replace(/(["'`])((?:\\.|(?!\1)[\s\S])*?)\1/g, (match, quote: string, rawValue: string) => {
     if (quote === "`" && rawValue.includes("${")) {
       return match;
     }
@@ -27,6 +27,15 @@ export function rewriteJs(input: RewriteJsInput): RewriteJsOutput {
     directRewrites += 1;
     return `${quote}${escapeForQuote(publicUrl, quote)}${quote}`;
   });
+
+  js = js.replace(/\bimport\s*\(\s*(["'])([^"']+)\1\s*\)/g, (_match, quote: string, specifier: string) => {
+    directRewrites += 1;
+    return `import(window.__clone3dResolveModuleUrl ? window.__clone3dResolveModuleUrl(${quote}${escapeForQuote(specifier, quote)}${quote}, ${quote}${escapeForQuote(input.scriptUrlOrBaseUrl, quote)}${quote}) : ${quote}${escapeForQuote(specifier, quote)}${quote})`;
+  });
+
+  if (/\bimport\s*\(\s*[^"'`]/.test(js)) {
+    warnings.push("dynamic-import-non-literal");
+  }
 
   return {
     js,

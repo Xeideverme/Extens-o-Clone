@@ -95,6 +95,44 @@
             <input id="pipeline-poll-interval" name="pipelinePollIntervalMs" type="number" min="500" max="5000" step="100" value="1000" />
           </label>
         </fieldset>
+        <fieldset>
+          <legend>Asset serving / CORS</legend>
+          <p>Catbox direto pode falhar para JS modules, dynamic imports, WASM, GLTF e fetch. Use CORS proxy ou fallback inline/blob.</p>
+          <label>
+            Asset serving mode
+            <select id="asset-serving-mode" name="assetServingMode">
+              <option value="auto">auto</option>
+              <option value="catbox-direct">catbox-direct</option>
+              <option value="catbox-cors-proxy">catbox-cors-proxy</option>
+              <option value="inline-blob">inline-blob</option>
+            </select>
+          </label>
+          <label class="checkbox-row">
+            <input id="cors-proxy-enabled" name="corsProxyEnabled" type="checkbox" />
+            Enable CORS proxy
+          </label>
+          <label>
+            CORS proxy endpoint
+            <input id="cors-proxy-endpoint" name="corsProxyEndpoint" type="url" placeholder="https://seu-worker.workers.dev" />
+          </label>
+          <label>
+            Module serving strategy
+            <select id="module-serving-strategy" name="moduleServingStrategy">
+              <option value="auto">auto</option>
+              <option value="proxy">proxy</option>
+              <option value="inline-source">inline-source</option>
+              <option value="inline-blob">inline-blob</option>
+            </select>
+          </label>
+          <label>
+            Max inline/blob asset KB
+            <input id="self-contained-max-inline" name="selfContainedMaxInlineAssetKb" type="number" min="64" max="51200" step="64" value="2048" />
+          </label>
+          <label class="checkbox-row">
+            <input id="allow-critical-missing" name="allowGenerateWithCriticalMissingAssets" type="checkbox" />
+            Permitir app.html com assets criticos faltando
+          </label>
+        </fieldset>
         <button type="submit">Salvar</button>
       </form>
       <p id="save-status" aria-live="polite"></p>
