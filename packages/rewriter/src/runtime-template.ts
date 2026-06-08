@@ -24,13 +24,25 @@ export function buildRuntimeResolverScript(
     const ASSET_MAP = ${assetMapJson};
     const INLINE_RESPONSES = ${inlineResponsesJson};
     const API_REPLAY = ${apiReplayMapJson};
-    const MODULE_SOURCES = ${moduleSourcesJson};
+    const MODULE_SOURCES = Object.assign(Object.create(null), readJsonScript("__CLONE3D_MODULE_SOURCES__"), ${moduleSourcesJson});
     const SERVING_SETTINGS = ${servingSettingsJson};
     const MODULE_BLOB_URLS = Object.create(null);
     window.__CLONE3D_ASSET_MAP__ = ASSET_MAP;
     window.__CLONE3D_INLINE_RESPONSES__ = INLINE_RESPONSES;
     window.__CLONE3D_API_REPLAY__ = API_REPLAY;
     window.__CLONE3D_MODULE_SOURCES__ = MODULE_SOURCES;
+    window.__CLONE3D_MODULE_BLOB_URLS__ = MODULE_BLOB_URLS;
+
+    function readJsonScript(id) {
+      try {
+        const element = document.getElementById(id);
+        if (!element || !element.textContent) return {};
+        const parsed = JSON.parse(element.textContent);
+        return parsed && typeof parsed === "object" ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
 
     function normalizeUrl(input, base) {
       try {

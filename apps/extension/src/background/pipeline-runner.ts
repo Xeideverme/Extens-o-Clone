@@ -204,6 +204,11 @@ async function runPipeline(pipelineRunId: string, deps: PipelineRunnerDeps): Pro
   if (pipelineRun?.autoGenerateHtml) {
     await updatePipelineStage(deps.jobStore, pipelineRunId, "rewriting", "Gerando app.html");
     await runRewriteStage(jobId, deps);
+    const rewrittenJob = await deps.jobStore.getJob(jobId);
+    if (rewrittenJob?.status === "rewrite-failed") {
+      await markPipelineRewriteFailed(pipelineRunId, deps.jobStore, rewrittenJob);
+      return;
+    }
     await assertPipelineCanContinue(deps.jobStore, pipelineRunId, jobId);
   }
 
@@ -299,7 +304,11 @@ async function assertPipelineCanContinue(jobStore: JobStore, pipelineRunId: stri
     throw new Error("pipeline_cancelled");
   }
 
-  if (job.status === "failed" || job.status === "rewrite-failed" || job.status === "prepare-3d-failed") {
+  if (job.status === "rewrite-failed") {
+    throw new Error(`pipeline_stage_failed:${job.status}`);
+  }
+
+  if (job.status === "failed" || job.status === "prepare-3d-failed") {
     if (!pipelineRun.continueOnPartialFailure) {
       throw new Error(`pipeline_stage_failed:${job.status}`);
     }
@@ -329,6 +338,32 @@ async function updatePipelineStage(
     status: "running",
     stage,
     currentStepLabel,
+    updatedAt: Date.now()
+  });
+}
+
+async function markPipelineRewriteFailed(pipelineRunId: string, jobStore: JobStore, job: NonNullable<Awaited<ReturnType<JobStore["getJob"]>>>): Promise<void> {
+  const current = await jobStore.getPipelineRun(pipelineRunId);
+  if (!current || current.status === "cancelled") {
+    return;
+  }
+
+  const validationErrors = job.rewriteReport?.validationReport?.errors ?? [];
+  const criticalAssetsMissing = job.rewriteReport?.criticalAssetsMissing ?? job.rewriteReport?.validationReport?.criticalAssetsMissing ?? [];
+  const messageParts = [
+    job.lastError,
+    validationErrors.length > 0 ? validationErrors.join("; ") : undefined,
+    criticalAssetsMissing.length > 0 ? `critical-assets-missing:${criticalAssetsMissing.slice(0, 10).join(",")}` : undefined,
+    job.errors.at(-1)?.message
+  ].filter(Boolean) as string[];
+  const message = messageParts[0] ?? "rewrite-failed";
+
+  await jobStore.updatePipelineRun(pipelineRunId, {
+    status: "failed",
+    stage: "failed",
+    finishedAt: Date.now(),
+    currentStepLabel: "Falha ao gerar app.html",
+    errors: [...current.errors, message],
     updatedAt: Date.now()
   });
 }

@@ -35,6 +35,15 @@ const SECRET_PATTERNS = [
 
 export function validateGeneratedAppHtml(input: ValidateGeneratedAppHtmlInput): AppHtmlValidationReport {
   const html = input.html;
+  const hasAssetManifest = html.includes("__CLONE3D_ASSET_MANIFEST__");
+  const hasRuntimeResolver = html.includes("__CLONE3D_RUNTIME_INSTALLED__");
+  const hasApiReplayMap = html.includes("__CLONE3D_API_REPLAY__");
+  const hasReplayableApiSnapshots = Boolean(
+    input.apiReplayReport &&
+      (input.apiReplayReport.replayMapEntries > 0 ||
+        input.apiReplayReport.inlinedResponses > 0 ||
+        input.apiReplayReport.rewrittenResponses > 0)
+  );
   const possibleSecretLeaks = findMatches(html, SECRET_PATTERNS).slice(0, 20);
   const moduleScriptsDirectToCatbox = findRegexMatches(
     html,
@@ -72,9 +81,13 @@ export function validateGeneratedAppHtml(input: ValidateGeneratedAppHtmlInput): 
     /\b(?:src|href)=["'](?:\.{1,2}\/|\/_next\/|\/api\/)[^"']+["']/gi
   ).slice(0, 50);
   const criticalAssetsMissing = findCriticalAssetsMissing(input.assets);
+  const transientWorkerWarnings = findTransientWorkerWarnings(input.assets);
   const blockingSecretLeaks = possibleSecretLeaks.filter(isBlockingSecretLeak);
 
   const errors = [
+    !hasAssetManifest ? "missing-asset-manifest" : undefined,
+    !hasRuntimeResolver ? "missing-runtime-resolver" : undefined,
+    hasReplayableApiSnapshots && !hasApiReplayMap ? "missing-api-replay-map" : undefined,
     ...blockingSecretLeaks.map((value) => `possible-secret-leak:${value}`),
     ...catboxDirectCorsRisks.map((value) => `catbox-direct-cors-risk:${value}`),
     ...nextImageUnresolved.map((value) => `next-image-unresolved:${value}`),
@@ -85,6 +98,7 @@ export function validateGeneratedAppHtml(input: ValidateGeneratedAppHtmlInput): 
     ...possibleSecretLeaks
       .filter((value) => !isBlockingSecretLeak(value))
       .map((value) => `possible-sensitive-string:${value}`),
+    ...transientWorkerWarnings,
     ...inlineScriptSyntaxWarnings.map((value) => `inline-script-syntax-warning:${value}`),
     ...unresolvedRelativeFetchCandidates.map((value) => `relative-fetch-candidate:${value}`),
     ...unresolvedLocalSrcCandidates.map((value) => `local-src-candidate:${value}`)
@@ -99,9 +113,9 @@ export function validateGeneratedAppHtml(input: ValidateGeneratedAppHtmlInput): 
     ok: errors.length === 0,
     errors: unique(errors),
     warnings: unique(warnings),
-    hasAssetManifest: html.includes("__CLONE3D_ASSET_MANIFEST__"),
-    hasRuntimeResolver: html.includes("__CLONE3D_RUNTIME_INSTALLED__"),
-    hasApiReplayMap: html.includes("__CLONE3D_API_REPLAY__"),
+    hasAssetManifest,
+    hasRuntimeResolver,
+    hasApiReplayMap,
     hasRewriteReport: html.includes("Clone3D Snapshot Rewrite Report") || html.includes("__CLONE3D_REWRITE_REPORT__"),
     unresolvedRelativeFetchCandidates,
     unresolvedLocalSrcCandidates,
@@ -129,6 +143,10 @@ export function findCriticalAssetsMissing(assets: AssetRecord[]): string[] {
 }
 
 export function isCriticalAsset(asset: AssetRecord): boolean {
+  if (isTransientWorkerWithoutBlob(asset)) {
+    return false;
+  }
+
   const contentType = asset.contentType?.toLowerCase() ?? "";
   const text = `${asset.normalizedUrl} ${asset.originalUrl} ${asset.detectedExtension ?? ""}`.toLowerCase();
   return Boolean(
@@ -152,6 +170,46 @@ export function isCriticalAsset(asset: AssetRecord): boolean {
       contentType.includes("application/wasm") ||
       /\.(js|mjs|css|json|gltf|glb|bin|wasm|drc|ktx2|basis)(?:[?#\s]|$)/i.test(text)
   );
+}
+
+export function findTransientWorkerWarnings(assets: AssetRecord[]): string[] {
+  return assets
+    .filter(isTransientWorkerWithoutBlob)
+    .map((asset) => `transient-worker-without-blob:${asset.normalizedUrl || asset.originalUrl}`)
+    .slice(0, 100);
+}
+
+export function isTransientWorkerWithoutBlob(asset: AssetRecord): boolean {
+  const url = asset.normalizedUrl || asset.originalUrl;
+  return Boolean(
+    asset.assetRole === "worker" &&
+      asset.status === "skipped" &&
+      asset.source?.includes("worker-hook") &&
+      !asset.localBlobId &&
+      !asset.publicUrl &&
+      !asset.preparedPublicUrl &&
+      isUuidLikeUrl(url) &&
+      !hasScriptExtension(url)
+  );
+}
+
+function isUuidLikeUrl(value: string): boolean {
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  try {
+    const segment = new URL(value).pathname.split("/").filter(Boolean).at(-1) ?? "";
+    return uuidPattern.test(segment);
+  } catch {
+    const segment = value.split(/[?#]/)[0]?.split("/").filter(Boolean).at(-1) ?? "";
+    return uuidPattern.test(segment);
+  }
+}
+
+function hasScriptExtension(value: string): boolean {
+  try {
+    return /\.(?:js|mjs)$/i.test(new URL(value).pathname);
+  } catch {
+    return /\.(?:js|mjs)(?:[?#]|$)/i.test(value);
+  }
 }
 
 function hasLocalTextFallback(asset: AssetRecord): boolean {

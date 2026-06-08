@@ -701,8 +701,11 @@ function renderRewriteStats(job: JobRecord | undefined): void {
   }
 
   const validation = report.validationReport;
+  const criticalMissing = report.criticalAssetsMissing ?? validation?.criticalAssetsMissing ?? [];
+  const jobError = job?.lastError || job?.errors.at(-1)?.message;
   rewriteStatsEl.textContent = [
     `app.html: ${report.outputFilename || job?.output?.fileName || "em andamento"}`,
+    job?.status === "rewrite-failed" && jobError ? `erro: ${jobError}` : undefined,
     `html: ${report.htmlRewrites}`,
     `css: ${report.cssRewrites}`,
     `js: ${report.jsDirectRewrites}`,
@@ -711,7 +714,8 @@ function renderRewriteStats(job: JobRecord | undefined): void {
     validation ? `validator: ${validation.ok ? "ok" : "erro"}` : undefined,
     validation?.catboxDirectCorsRisks.length ? `catbox CORS: ${validation.catboxDirectCorsRisks.length}` : undefined,
     validation?.nextImageUnresolved.length ? `next image: ${validation.nextImageUnresolved.length}` : undefined,
-    validation?.criticalAssetsMissing.length ? `criticos faltando: ${validation.criticalAssetsMissing.length}` : undefined,
+    criticalMissing.length ? `criticos faltando: ${criticalMissing.length}` : undefined,
+    criticalMissing.length ? `primeiros: ${criticalMissing.slice(0, 10).map(compactUrl).join(", ")}` : undefined,
     currentSettings?.corsProxyEnabled ? "proxy: sim" : "proxy: nao"
   ].join(" | ");
 }

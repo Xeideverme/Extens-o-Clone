@@ -7,7 +7,7 @@ import {
   requiresCorsSafeServing
 } from "./asset-serving";
 import { buildAssetManifest } from "./asset-map";
-import { findCriticalAssetsMissing, validateGeneratedAppHtml } from "./app-html-validator";
+import { findCriticalAssetsMissing, findTransientWorkerWarnings, validateGeneratedAppHtml } from "./app-html-validator";
 import { rewriteHtml } from "./html-rewriter";
 import { rewriteJs } from "./js-rewriter";
 import { buildInlineJsonResponses } from "./json-inliner";
@@ -20,7 +20,7 @@ export function generateAppHtml(input: GenerateAppHtmlInput): GenerateAppHtmlOut
   const servingSettings = normalizeRuntimeAssetServingSettings(input.servingSettings);
   const missingCriticalAssets = findCriticalAssetsMissing(input.assets);
   if (missingCriticalAssets.length > 0 && !input.allowGenerateWithCriticalMissingAssets) {
-    throw new Error(`critical-assets-missing:${missingCriticalAssets.slice(0, 10).join(",")}`);
+    throw new Error(`critical-assets-missing:${missingCriticalAssets.join(",")}`);
   }
 
   const manifestResult = buildAssetManifest(input.job, input.assets, servingSettings);
@@ -34,14 +34,13 @@ export function generateAppHtml(input: GenerateAppHtmlInput): GenerateAppHtmlOut
   const moduleSources = buildModuleSourceMap(textAssets, manifest, servingSettings);
   const manifestScript = `<script id="__CLONE3D_ASSET_MANIFEST__" type="application/json">${escapeJsonForHtml(JSON.stringify(manifest))}</script>`;
   const apiReplayScript = `<script id="__CLONE3D_API_REPLAY__" type="application/json">${escapeJsonForHtml(JSON.stringify(apiReplay.replayMap))}</script>`;
-  const moduleSourcesScript = `<script id="__CLONE3D_MODULE_SOURCES__" type="application/json">${escapeJsonForHtml(JSON.stringify(moduleSources))}</script>`;
+  const moduleSourcesScript =
+    Object.keys(moduleSources).length > 0
+      ? `<script id="__CLONE3D_MODULE_SOURCES__" type="application/json">${escapeJsonForHtml(JSON.stringify(moduleSources))}</script>`
+      : "";
   const runtimeScript = input.runtimeResolverEnabled
-    ? `<script>${buildRuntimeResolverScript(
-        manifest,
-        inlineJson.inlineResponses,
-        apiReplay.replayMap,
-        moduleSources,
-        servingSettings
+    ? `<script data-clone3d-runtime>${escapeScriptForHtml(
+        buildRuntimeResolverScript(manifest, inlineJson.inlineResponses, apiReplay.replayMap, moduleSources, servingSettings)
       )}</script>`
     : "";
 
@@ -51,7 +50,7 @@ export function generateAppHtml(input: GenerateAppHtmlInput): GenerateAppHtmlOut
   report.apiReplaySkippedSensitive = input.job.apiReplayReport?.skippedSensitive ?? 0;
   report.apiReplaySkippedTooLarge = input.job.apiReplayReport?.skippedTooLarge ?? 0;
   report.criticalAssetsMissing = missingCriticalAssets;
-  report.warnings.push(...manifestResult.warnings, ...inlineJson.warnings, ...apiReplay.warnings);
+  report.warnings.push(...manifestResult.warnings, ...inlineJson.warnings, ...apiReplay.warnings, ...findTransientWorkerWarnings(input.assets));
   if (input.assets.some((asset) => isGltfAsset(asset) && !asset.threeDPrepared)) {
     report.warnings.push("This job contains GLTF files that may require 3D preparation before app.html generation.");
   }
@@ -68,7 +67,7 @@ export function generateAppHtml(input: GenerateAppHtmlInput): GenerateAppHtmlOut
     apiReplayMap: apiReplay.replayMap,
     inlineThresholdBytes,
     runtimeScript,
-    manifestScript: `${manifestScript}\n${apiReplayScript}\n${moduleSourcesScript}`
+    manifestScript: [manifestScript, apiReplayScript, moduleSourcesScript].filter(Boolean).join("\n")
   });
 
   report.htmlRewrites = rewritten.htmlRewrites;
@@ -251,6 +250,10 @@ function finalizeReport(report: RewriteReport, filename: string, outputSize: num
 
 function byteLength(value: string): number {
   return new TextEncoder().encode(value).byteLength;
+}
+
+function escapeScriptForHtml(value: string): string {
+  return value.replace(/<\/script/gi, "<\\/script").replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
 }
 
 function pad(value: number): string {

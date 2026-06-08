@@ -66,6 +66,7 @@ export interface JobRecord {
   mode: CaptureMode;
   stats: JobStats;
   errors: JobError[];
+  lastError?: string;
   output?: OutputRecord;
   rewriteReport?: RewriteReport;
   threeDPreparationReport?: ThreeDPreparationReport;

@@ -2,6 +2,7 @@ import { createRewriteReport, generateAppHtml, type TextAssetRecord } from "@clo
 import type { BlobStoreLike, JobStore } from "@clone3d/storage";
 import { sha256Blob } from "@clone3d/shared";
 import type {
+  AppHtmlValidationReport,
   AssetRecord,
   CurrentHtmlSnapshotResponse,
   GeneratedOutputRecord,
@@ -123,19 +124,25 @@ export async function runPreparedRewriteJob(jobId: string, deps: RewriteRunnerDe
 
     return buildJobSummary(deps.jobStore, job.id);
   } catch (error) {
+    const message = errorToMessage(error);
+    const criticalAssetsMissing = parseCriticalAssetsMissing(message);
     report = {
       ...report,
       finishedAt: Date.now(),
-      warnings: [...report.warnings, errorToMessage(error)]
+      criticalAssetsMissing: criticalAssetsMissing.length > 0 ? criticalAssetsMissing : report.criticalAssetsMissing,
+      validationReport: report.validationReport ?? createFailedValidationReport(job.id, message, criticalAssetsMissing),
+      warnings: [...report.warnings, message]
     };
     await deps.jobStore.updateJob(job.id, {
       status: "rewrite-failed",
       rewriteReport: report,
+      latestRewriteReport: report,
+      lastError: message,
       errors: [
         ...job.errors,
         {
           code: "rewrite_failed",
-          message: errorToMessage(error),
+          message,
           createdAt: Date.now()
         }
       ]
@@ -151,20 +158,27 @@ export async function markRewriteRunFailed(jobId: string, jobStore: JobStore, er
     return;
   }
 
+  const message = errorToMessage(error);
+  const criticalAssetsMissing = parseCriticalAssetsMissing(message);
   const report = {
     ...(job.rewriteReport ?? createRewriteReport(job.id)),
     finishedAt: Date.now(),
-    warnings: [...(job.rewriteReport?.warnings ?? []), errorToMessage(error)]
+    criticalAssetsMissing: criticalAssetsMissing.length > 0 ? criticalAssetsMissing : job.rewriteReport?.criticalAssetsMissing,
+    validationReport:
+      job.rewriteReport?.validationReport ?? createFailedValidationReport(job.id, message, criticalAssetsMissing),
+    warnings: [...(job.rewriteReport?.warnings ?? []), message]
   };
 
   await jobStore.updateJob(job.id, {
     status: "rewrite-failed",
     rewriteReport: report,
+    latestRewriteReport: report,
+    lastError: message,
     errors: [
       ...job.errors,
       {
         code: "rewrite_runner_failed",
-        message: errorToMessage(error),
+        message,
         createdAt: Date.now()
       }
     ]
@@ -249,4 +263,45 @@ function isTextAsset(asset: AssetRecord): boolean {
 
 function errorToMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function parseCriticalAssetsMissing(message: string): string[] {
+  if (!message.startsWith("critical-assets-missing:")) {
+    return [];
+  }
+
+  return message
+    .slice("critical-assets-missing:".length)
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function createFailedValidationReport(
+  jobId: string,
+  message: string,
+  criticalAssetsMissing: string[] = []
+): AppHtmlValidationReport {
+  return {
+    jobId,
+    createdAt: Date.now(),
+    ok: false,
+    errors: ["validation-not-run-because-rewrite-failed", message],
+    warnings: [],
+    hasAssetManifest: false,
+    hasRuntimeResolver: false,
+    hasApiReplayMap: false,
+    hasRewriteReport: false,
+    unresolvedRelativeFetchCandidates: [],
+    unresolvedLocalSrcCandidates: [],
+    possibleSecretLeaks: [],
+    assetMapEntries: 0,
+    apiReplayEntries: 0,
+    catboxDirectCorsRisks: [],
+    nextImageUnresolved: [],
+    moduleScriptsDirectToCatbox: [],
+    dynamicImportsDirectToCatbox: [],
+    criticalAssetsMissing,
+    inlineScriptSyntaxWarnings: []
+  };
 }
